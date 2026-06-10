@@ -35,4 +35,8 @@ max-statements = 50
 # This table is the ONLY section a consumer may locally extend (and the only
 # dotted path allowed in [tool.ruff-sync].exclude) — every added ignore must
 # trace to a reasoned entry in the repo's exemptions.json (cf-exemptions).
+# Both glob forms, by measurement: 'tests/*' alone missed nested layouts (a
+# monorepo's server/tests drew 845 false S101 in the mount wave); '**/tests/*'
+# covers any depth and the root form stays alongside it, harmless.
 "tests/*" = ["S101"]
+"**/tests/*" = ["S101"]

@@ -47,6 +47,23 @@ def test_ruff_base_selects_the_gate_rule_battery() -> None:
         assert rule in select, f"missing rule family: {rule}"
 
 
+def test_ruff_base_test_ignores_cover_nested_layouts() -> None:
+    # Mount-wave regression: 'tests/*' matches only repo-root tests — a
+    # monorepo (mexxa server/tests) drew 845 false S101. The doubled glob
+    # '**/tests/*' covers nested layouts; the root form stays, harmless.
+    ignores = _load_toml("ruff-base.toml")["lint"]["per-file-ignores"]
+    assert "S101" in ignores["**/tests/*"], "nested tests/ dirs must carry the S101 carve-out"
+    assert "S101" in ignores["tests/*"], "the root-level form stays alongside the doubled glob"
+
+
+def test_kit_own_ruff_config_test_ignores_cover_nested_layouts() -> None:
+    # The kit mirrors the gauge it ships (it submits before it preaches).
+    pyproject = _load_toml("../pyproject.toml")
+    ignores = pyproject["tool"]["ruff"]["lint"]["per-file-ignores"]
+    assert "S101" in ignores["**/tests/*"]
+    assert "S101" in ignores["tests/*"]
+
+
 def test_ruff_base_header_declares_vendoring_and_sync_allowlist() -> None:
     text = (CONFIGS_DIR / "ruff-base.toml").read_text(encoding="utf-8")
     assert "vendored per consumer repo" in text

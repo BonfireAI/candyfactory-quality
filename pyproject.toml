@@ -55,7 +55,10 @@ max-statements = 50
 
 [tool.ruff.lint.per-file-ignores]
 # S101: pytest's assert is the test idiom, not a security hole.
+# Doubled glob mirrors configs/ruff-base.toml: '**/tests/*' covers nested
+# layouts (the mount wave's monorepo false-positive), root form kept.
 "tests/*" = ["S101"]
+"**/tests/*" = ["S101"]
 
 [tool.mypy]
 python_version = "3.12"
