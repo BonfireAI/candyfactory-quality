@@ -18,6 +18,10 @@ dev = [
     "mypy",
     "mypy-baseline",
     "complexipy",
+    # pyyaml: tests/test_workflows.py parses the CI workflow YAML surfaces.
+    "pyyaml",
+    # types-PyYAML: mypy stubs so the test battery type-checks at zero errors.
+    "types-PyYAML",
 ]
 
 [project.scripts]
