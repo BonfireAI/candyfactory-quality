@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "candyfactory-quality"
+version = "0.1.0"
+description = "CandyFactory gauge kit — the BubbleGum Law's gate battery and sticky-intro mount."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "CandyFactory" }]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "mypy-baseline",
+    "complexipy",
+]
+
+[project.scripts]
+cf-file-budget = "cf_quality.file_budget:main"
+cf-sticky-check = "cf_quality.sticky_check:main"
+cf-mirror-check = "cf_quality.mirror_check:main"
+cf-recursion-check = "cf_quality.recursion_check:main"
+cf-exemptions = "cf_quality.exemptions:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C901", "PLR0915", "S", "BLE"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-statements = 50
+
+[tool.ruff.lint.per-file-ignores]
+# S101: pytest's assert is the test idiom, not a security hole.
+"tests/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
