@@ -80,10 +80,28 @@ def test_every_vector_section_carries_a_verdict() -> None:
     )
 
 
+#: Internal Linear ticket pattern, concatenated so this guard's own source
+#: never contains the contiguous literal and the repo-wide oracle stays empty.
+_INTERNAL_TICKET = re.compile(rb"\bBON" + rb"-")
+
+#: Tool/VCS caches that are not part of the shipped tree.
+_SCAN_SKIP_DIRS = frozenset(
+    {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv"}
+)
+
+
 def test_no_internal_ticket_references() -> None:
-    """The kit graduates toward public surfaces: no internal Linear ids."""
-    assert not re.search(r"\bBON-\d+", _design_text()), (
-        "DESIGN.md must not carry internal ticket references"
+    """The kit graduates toward public surfaces: no internal Linear ids anywhere."""
+    offenders = [
+        str(path.relative_to(REPO_ROOT))
+        for path in sorted(REPO_ROOT.rglob("*"))
+        if path.is_file()
+        and not _SCAN_SKIP_DIRS.intersection(path.relative_to(REPO_ROOT).parts)
+        and _INTERNAL_TICKET.search(path.read_bytes())
+    ]
+    assert not offenders, (
+        f"internal ticket references found in: {offenders} — "
+        "the kit must carry zero internal Linear ids in any file"
     )
 
 

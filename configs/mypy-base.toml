@@ -21,7 +21,7 @@ warn_redundant_casts = true
 # consumer's vendored copy):
 #
 # [[tool.mypy.overrides]]
-# # per-module grace: <reason — e.g. untyped vendored client, shrink ticket BON-NNNN>
+# # per-module grace: <reason — e.g. untyped vendored client, shrink ticket TICKET-NNNN>
 # module = "legacy_pkg.*"
 # disallow_untyped_defs = false
 #
