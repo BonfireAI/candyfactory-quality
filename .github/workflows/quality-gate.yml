@@ -1,0 +1,149 @@
+# candyfactory-quality · the shared quality gate — the BubbleGum Law's executable surface.
+#
+# Reusable-only: consumers call this workflow via the generated caller stub
+# (templates/quality.caller.yml), pinned to a FULL commit SHA (docs/sha-pin-doctrine.md).
+#
+# NO inputs, by design (the inputs block stays empty forever): the Law-1 refuter
+# showed that any skip/mode input is a neutering vector — a stub can "call the
+# gate" while never gating. With zero declared inputs, GitHub itself rejects any
+# caller that passes one (`with:` against an undeclared input is a workflow
+# error), so a skip knob cannot even be smuggled in. Behavior differences live
+# in committed consumer-repo state (baselines, MIRRORS.md), never in caller knobs.
+name: quality-gate
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # Consumer tree and kit tree are checked out side by side; every gate
+        # command runs from the consumer root so the kit's own files are never
+        # double-gated into the consumer's verdict.
+        working-directory: repo
+    steps:
+      # FIRST, before any checkout: self-assert the trigger context. A caller
+      # stub that filters triggers (workflow_dispatch-only, schedule, etc.) is
+      # the refuter's neutering vector #1 — refuse it loudly.
+      - name: Self-assert trigger context (anti-neutering)
+        working-directory: ${{ github.workspace }}
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          case "$EVENT" in
+            push|pull_request)
+              echo "trigger context OK: $EVENT"
+              ;;
+            *)
+              echo "::error::quality-gate refused: trigger is '$EVENT' — the gate only counts on push/pull_request; a filtered caller stub is a neutered gate"
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout consumer repo
+        # In a reusable workflow the github context belongs to the CALLER, so a
+        # bare checkout lands the consumer repo at the triggering ref.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: repo
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Checkout the gauge kit at the calling SHA
+        # `github.job_workflow_sha` is the commit the caller pinned this
+        # reusable workflow to — so the gate scripts and this workflow file are
+        # always the SAME commit (no gauge/workflow skew).
+        #
+        # The private-repo access assumption: the default GITHUB_TOKEN can read
+        # BonfireAI/candyfactory-quality only because the kit repo grants
+        # org-internal Actions access (Settings → Actions → General → Access:
+        # "Accessible from repositories in the BonfireAI organization"). If that
+        # grant is ever removed this step fails loudly with a 404 — the fix is
+        # to restore the grant or pass a fine-grained PAT via the caller's
+        # `secrets: inherit`.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: BonfireAI/candyfactory-quality
+          ref: ${{ github.job_workflow_sha }}
+          path: .cf-quality
+          token: ${{ github.token }}
+
+      - name: Install the gauge kit + pinned tool battery
+        # [dev] carries ruff/mypy/mypy-baseline/pytest/complexipy — one gauge
+        # block; the consumer never supplies its own copies of the gate tools.
+        run: pip install "$GITHUB_WORKSPACE/.cf-quality[dev]"
+
+      - name: Install the consumer package
+        run: |
+          if [ ! -f pyproject.toml ]; then
+            echo "::notice::no pyproject.toml — consumer package install skipped (gates still run)"
+            exit 0
+          fi
+          EXTRA=$(python -c "import tomllib, pathlib; d = tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8')); print('dev' if 'dev' in d.get('project', {}).get('optional-dependencies', {}) else '')")
+          if [ -n "$EXTRA" ]; then
+            pip install -e '.[dev]'
+          else
+            pip install -e .
+          fi
+
+      - name: Assert the vendored ruff gauge is present
+        # ruff with NO config falls back to defaults far weaker than the gauge —
+        # a consumer with no vendored config would pass a hollow lint. Refuse.
+        run: |
+          if [ ! -f ruff.toml ] && [ ! -f .ruff.toml ] && ! grep -q '^\[tool\.ruff' pyproject.toml 2>/dev/null; then
+            echo "::error::no vendored ruff gauge found (ruff.toml / .ruff.toml / [tool.ruff]) — vendor configs/ruff-base.toml per the kit README"
+            exit 1
+          fi
+
+      - name: ruff check (vendored ruff config)
+        # ruff discovers the consumer's VENDORED copy of configs/ruff-base.toml
+        # (drift between the copy and the gauge is the ruff-sync/Constable beat).
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: cf-sticky-check — the sticky intro is mounted, byte-faithful
+        run: cf-sticky-check check .
+
+      - name: cf-file-budget — new files ≤ 500 lines, baseline shrink-only
+        run: cf-file-budget check
+
+      - name: cf-mirror-check — declared mirrors only (skip-if-no-MIRRORS.md)
+        run: |
+          if [ -f MIRRORS.md ]; then
+            cf-mirror-check check --repo .
+          else
+            echo "::notice::cf-mirror-check SKIPPED — no MIRRORS.md in this repo; if it carries cross-repo copies, declare them (cf-mirror-check init)"
+          fi
+
+      - name: cf-recursion-check — recursion declared with a stated bound
+        run: cf-recursion-check .
+
+      - name: cf-exemptions — every suppression traces to a reasoned entry
+        run: cf-exemptions
+
+      - name: mypy through the baseline ratchet (skip-if-no-baseline)
+        # The pipe is the design: mypy exits nonzero whenever baselined debt
+        # exists; mypy-baseline filter is the gate (0 new errors), so the step
+        # gates on the LAST command — deliberately no pipefail here.
+        run: |
+          if [ -f mypy-baseline.txt ]; then
+            mypy src --config-file "$GITHUB_WORKSPACE/.cf-quality/configs/mypy-base.toml" | mypy-baseline filter
+          else
+            echo "::notice::mypy ratchet SKIPPED — no mypy-baseline.txt; boot it per configs/BASELINE-CONVENTIONS.md (mypy src | mypy-baseline sync)"
+          fi
+
+      - name: pytest
+        # Plain pytest: a repo with zero collected tests exits 5 and FAILS the
+        # floor on purpose — a floor without tests is prose, not a gate.
+        run: pytest

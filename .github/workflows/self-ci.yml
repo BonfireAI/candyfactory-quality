@@ -1,0 +1,68 @@
+# candyfactory-quality · the kit's OWN CI — the gauge submits to its own gate.
+#
+# Deliberately NOT via workflow_call: the kit runs the same battery directly so
+# a broken reusable workflow can never grade itself green. Same commands, same
+# budgets (CC ≤ 10, ≤ 50 statements, files ≤ 500 lines, 0 mypy errors — this
+# repo adopts at baseline zero, so mypy runs bare with no baseline filter).
+name: self-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the kit + tool battery
+        # PyYAML is a test-only dep (validates the workflow files themselves);
+        # pyproject.toml is integrator-owned, so it is declared here instead.
+        run: |
+          pip install -e '.[dev]'
+          pip install pyyaml
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: cf-sticky-check — this repo carries its own sticky intro
+        run: cf-sticky-check check .
+
+      - name: cf-file-budget — this repo obeys its own file budget
+        run: cf-file-budget check
+
+      - name: cf-mirror-check — this repo's declared mirrors hold
+        run: |
+          if [ -f MIRRORS.md ]; then
+            cf-mirror-check check --repo .
+          else
+            echo "::notice::cf-mirror-check SKIPPED — no MIRRORS.md yet; the sticky-intro mirror of canon ADR 0029 must be declared before v0.1"
+          fi
+
+      - name: cf-recursion-check — recursion declared in the kit's own source
+        run: cf-recursion-check src
+
+      - name: cf-exemptions — the kit's suppressions trace to reasoned entries
+        run: cf-exemptions
+
+      - name: mypy (zero baseline — the new repo owes 0 type errors, bare)
+        run: mypy src
+
+      - name: pytest
+        run: pytest
