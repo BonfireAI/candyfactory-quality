@@ -2,18 +2,21 @@
 
 Reads the target repo's ``MIRRORS.md`` — a markdown table with one row per
 declared mirror: artifact | local path | parent repo | parent path |
-pinned parent SHA | content sha256 (plus an optional ``pinned date`` column,
-YYYY-MM-DD). Three checks:
+pinned parent SHA | content sha256 | pinned date (YYYY-MM-DD). Three checks:
 
 (a) every declared local file exists and its sha256 matches the declared
     content hash — divergence fails with BOTH hashes in the finding;
 (b) rows missing any required field fail (a half-declaration is no
-    declaration);
-(c) staleness — rows carrying a ``pinned date`` older than
-    ``--max-pin-age-days`` (default 90) fail as a stale pin. This is the
-    answer to the declare-don't-fix gaming vector: declaring a divergence
-    legalizes it only temporarily; legalized drift expires and must be
-    re-affirmed or healed.
+    declaration). ``pinned date`` IS a required field — the refuter showed
+    that an optional date made expiry opt-out (omit the column, never
+    expire), so a declaration without an expiry clock is no declaration;
+(c) staleness — a ``pinned date`` older than ``--max-pin-age-days``
+    (default 90) fails as a stale pin, and a FUTURE date fails outright
+    (``MIRROR_PIN_FUTURE`` — the refuter's 2099 pin gave negative age and
+    made a declaration immortal). This is the answer to the
+    declare-don't-fix gaming vector: declaring a divergence legalizes it
+    only temporarily; legalized drift expires and must be re-affirmed or
+    healed.
 
 ``cf-mirror-check init`` emits a template ``MIRRORS.md``.
 
@@ -23,7 +26,13 @@ exists, bytes match the declared hash, pin is fresh). Whether the pinned
 parent SHA still names real parent content, and whether the parent has moved
 on since the pin, is NOT checked here; that diff requires fetching the parent
 repo (auth design unbuilt — see the Law 5 refuter notes) and lands in a later
-version or on Constable cadence.
+version or on Constable cadence. The required pin date is the backstop: with
+expiry unavoidable (no omitted dates, no future dates), self-declared drift
+is at worst max-pin-age old before a human must re-affirm it against the
+parent. ALSO OPEN: the gate checks only DECLARED rows — an undeclared
+cross-repo copy is invisible to it (the repo self-enumerates its mirrors);
+a fingerprint scanner for likely-undeclared mirrors is Constable-cadence
+work, recorded in DESIGN.md Open issues.
 """
 
 from __future__ import annotations
@@ -48,6 +57,7 @@ REQUIRED_COLUMNS = (
     "parent path",
     "pinned parent sha",
     "content sha256",
+    "pinned date",
 )
 PINNED_DATE_COLUMN = "pinned date"
 
@@ -103,6 +113,7 @@ class MirrorRow:
             self.parent_path,
             self.pinned_sha,
             self.content_sha256,
+            self.pinned_date or "",
         )
         return [name for name, value in zip(REQUIRED_COLUMNS, values, strict=True) if not value]
 
@@ -195,7 +206,14 @@ def _check_content(repo: Path, row: MirrorRow) -> GateViolation | None:
 
 def _check_pin(row: MirrorRow, max_pin_age_days: int, today: dt.date) -> GateViolation | None:
     if row.pinned_date is None:
-        return None
+        # Defensive: completeness is checked before this runs, so a missing
+        # pin is its own loud finding here, never a silent expiry bypass.
+        return GateViolation(
+            code="MIRROR_PIN_MISSING",
+            message=f"mirror '{row.artifact}' has no pinned date — expiry is not optional",
+            path=row.local_path,
+            line=row.line,
+        )
     try:
         pinned = dt.date.fromisoformat(row.pinned_date)
     except ValueError:
@@ -205,6 +223,17 @@ def _check_pin(row: MirrorRow, max_pin_age_days: int, today: dt.date) -> GateVio
             path=row.local_path,
             line=row.line,
             context={"pinned_date": row.pinned_date},
+        )
+    if pinned > today:
+        return GateViolation(
+            code="MIRROR_PIN_FUTURE",
+            message=(
+                f"mirror '{row.artifact}' pinned date {row.pinned_date} is in the "
+                "future — a forward-dated pin would never expire and is refused"
+            ),
+            path=row.local_path,
+            line=row.line,
+            context={"pinned_date": row.pinned_date, "today": today.isoformat()},
         )
     age_days = (today - pinned).days
     if age_days > max_pin_age_days:

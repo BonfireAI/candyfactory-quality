@@ -1,0 +1,12 @@
+{
+  "frozen_count": 1,
+  "entries": [
+    {
+      "file": "src/cf_quality/exemptions.py",
+      "symbol_or_line": "_run_fold_ins",
+      "rule": "S603",
+      "reason": "subprocess.run executes only the repo-local fold-in script through sys.executable, fixed argv, no shell, no untrusted input",
+      "approver": "Anta (quality-stratum refuter-fix pass, 2026-06-10)"
+    }
+  ]
+}

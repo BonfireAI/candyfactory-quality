@@ -102,3 +102,19 @@ def test_baseline_conventions_documents_observed_workflows() -> None:
     assert "mypy-baseline sync" in text  # type-debt baseline boot
     assert "mypy-baseline filter" in text  # CI-side set-difference gate
     assert "does NOT auto-shrink" in text  # the complexipy re-snapshot duty
+
+
+def test_ruff_base_gates_blanket_and_unused_noqa() -> None:
+    # Refuter: a codeless blanket noqa suppressed C901 with no backstop.
+    # PGH004 fails blanket noqa at lint altitude; RUF100 fails unused ones.
+    select = _load_toml("ruff-base.toml")["lint"]["select"]
+    assert "PGH004" in select, "blanket-noqa must fail at lint altitude"
+    assert "RUF100" in select, "unused noqa must fail at lint altitude"
+
+
+def test_kit_own_ruff_config_gates_blanket_and_unused_noqa() -> None:
+    import tomllib
+
+    pyproject = tomllib.loads((CONFIGS_DIR.parent / "pyproject.toml").read_text(encoding="utf-8"))
+    select = pyproject["tool"]["ruff"]["lint"]["select"]
+    assert "PGH004" in select and "RUF100" in select

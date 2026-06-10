@@ -288,6 +288,103 @@ class TestInitMode:
         assert data["files"] == {}
 
 
+def write_joined_py(path: Path, statements: int, per_line: int) -> None:
+    """Real statements re-flowed N-per-physical-line via ';' (the refuter's attack 1)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        "; ".join(f"x{j} = {j}" for j in range(i, min(i + per_line, statements)))
+        for i in range(0, statements, per_line)
+    ]
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+class TestCompressionResistance:
+    """Refuter attack 1: statement-joining must not manufacture a shrink.
+
+    The draw is anchored to ``max(physical lines, logical statements)`` so
+    re-flowing the same code onto fewer physical lines cannot free headroom.
+    """
+
+    def test_statement_joining_cannot_fake_a_shrink(self, tmp_path: Path, capsys: Any) -> None:
+        # 900 real statements joined 3-per-line = 300 physical lines, against a
+        # 700 freeze: the truth is GROWTH, never a shrink notice.
+        write_joined_py(tmp_path / "src" / "chunk" / "handle.py", 900, 3)
+        write_budget(
+            tmp_path,
+            {"files": {"src/chunk/handle.py": 700}, "packages": {"src/chunk": 700}},
+        )
+        assert main(["check", "--root", str(tmp_path)]) == 1
+        out = capsys.readouterr().out
+        assert "ratchet the baseline down" not in out  # no shrink notice was printed
+        assert "FILE_BUDGET_GREW" in violation_codes(report_from(out))
+
+    def test_joined_shrink_cannot_free_package_headroom(self, tmp_path: Path, capsys: Any) -> None:
+        # The full refuter repro: joined handle.py + a brand-new 380-line
+        # sibling = 1280 real statements in a package frozen at 700.
+        write_joined_py(tmp_path / "src" / "chunk" / "handle.py", 900, 3)
+        write_py(tmp_path / "src" / "chunk" / "new_engine.py", 380)
+        write_budget(
+            tmp_path,
+            {"files": {"src/chunk/handle.py": 700}, "packages": {"src/chunk": 700}},
+        )
+        assert main(["check", "--root", str(tmp_path)]) == 1
+        codes = violation_codes(report_from(capsys.readouterr().out))
+        assert "PACKAGE_BUDGET_EXCEEDED" in codes
+
+    def test_new_file_cap_counts_statements_not_just_lines(
+        self, tmp_path: Path, capsys: Any
+    ) -> None:
+        # 600 statements squeezed onto 200 physical lines is a >500 file in truth.
+        write_joined_py(tmp_path / "src" / "mod.py", 600, 3)
+        assert main(["check", "--root", str(tmp_path)]) == 1
+        assert "FILE_BUDGET_EXCEEDED" in violation_codes(report_from(capsys.readouterr().out))
+
+    def test_measure_is_max_of_lines_and_statements(self, tmp_path: Path) -> None:
+        from cf_quality.file_budget import measure_file
+
+        multi_line = tmp_path / "a.py"
+        multi_line.write_text("x = (\n    1,\n    2,\n)\n", encoding="utf-8")
+        assert measure_file(multi_line) == 4  # one statement across four lines
+        joined = tmp_path / "b.py"
+        joined.write_text("a = 1; b = 2; c = 3\n", encoding="utf-8")
+        assert measure_file(joined) == 3  # three statements on one line
+
+    def test_init_freezes_the_compression_resistant_measure(self, tmp_path: Path) -> None:
+        write_joined_py(tmp_path / "src" / "dense.py", 600, 3)
+        data = init_tree(tmp_path)
+        assert data["files"] == {"src/dense.py": 600}
+        assert data["packages"] == {"src": 600}
+
+    def test_unparseable_python_raises_typed_gate_error(self, tmp_path: Path) -> None:
+        bad = tmp_path / "broken.py"
+        bad.write_text("def broken(:\n", encoding="utf-8")
+        with pytest.raises(GateError) as exc:
+            check_tree(tmp_path, Budget(files={}, packages={}))
+        assert exc.value.code == "GATE_SOURCE_UNPARSEABLE"
+
+
+class TestGreenfieldPackageBoundary:
+    """Refuter attack 2: greenfield multi-file dumps never seed a package budget.
+
+    This is a DISCLOSED v0 boundary, not silence: the package draw engages
+    only for directories already holding a >500 offender at init time.
+    """
+
+    def test_greenfield_sub_500_siblings_pass_and_the_boundary_is_disclosed(
+        self, tmp_path: Path
+    ) -> None:
+        for name in ("a", "b", "c", "d", "e"):
+            write_py(tmp_path / "src" / "chunk" / f"engine_{name}.py", 499)
+        data = init_tree(tmp_path)
+        assert data == {"files": {}, "packages": {}}  # nothing seeded the draw
+        violations, _ = check_tree(tmp_path, Budget(files={}, packages={}))
+        assert violations == []  # 2495 lines in one package, green — the boundary
+        import cf_quality.file_budget as fb
+
+        assert fb.__doc__ is not None
+        assert "greenfield" in fb.__doc__, "the relocation-only boundary must be disclosed"
+
+
 class TestCheckTreeApi:
     def test_check_tree_returns_typed_violations(self, tmp_path: Path) -> None:
         write_py(tmp_path / "big.py", 600)

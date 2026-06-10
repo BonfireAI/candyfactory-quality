@@ -1,17 +1,36 @@
 """cf-sticky-check — the sticky-intro gauge (the BubbleGum Law's mount).
 
-``check`` mode: the consumer repo's CLAUDE.md must CONTAIN the canonical
-sticky block byte-identical (line-ending normalization only). Chewed gum —
-any edit inside the block — fails with a unified diff; an absent block fails.
+``check`` mode: the consumer repo's CLAUDE.md must carry the canonical sticky
+block byte-identical (line-ending normalization only), as LIVE content, and
+exactly once. Detection is anchored to line overlap against the whole block,
+never to its first line (the refuter's chewed-heading attack downgraded
+TAMPERED to ABSENT and tricked mount into duplicating the block):
+
+- a near-copy (>=50% of the block's non-empty lines present) that is not
+  byte-identical fails ``STICKY_INTRO_TAMPERED`` with a unified diff;
+- a block present only inside an HTML comment or a fenced code block fails
+  ``STICKY_INTRO_BURIED`` — carried in bytes, invisible to a reader;
+- a second copy (pristine or chewed, including a same-heading contradictory
+  block) alongside the canonical one fails ``STICKY_INTRO_DUPLICATED``;
+- neutralizing prose in the lines directly above the block ("DEPRECATED",
+  "does not apply", "ignore", ...) fails ``STICKY_INTRO_NEUTRALIZED``;
+- no recognizable trace of the block fails ``STICKY_INTRO_ABSENT``.
 
 ``mount`` mode: append the block under a one-line declared-mirror header when
-absent; idempotent (a second mount is a no-op); refuses to mount over a
-tampered block so chewed gum is never silently duplicated or papered over.
+absent; idempotent (a second mount is a no-op); refuses to mount over ANY
+recognizable near-copy of the block — chewed gum (heading included) is never
+silently duplicated or papered over.
 
 The canonical text is loaded from the KIT's own packaged data file, never from
 the consumer repo — the gauge block comes from the factory, so a consumer
 cannot re-declare its own edited copy as canonical (the declare-don't-fix and
 vendored-copy-edit gaming vectors from the Law 5 refuter).
+
+HONEST OPEN (salience): the neutralizer check is a keyword heuristic, not an
+understanding of prose — wording it polices can be paraphrased past it. Full
+salience (does the operative document actually TEACH the law?) is a reading
+task; the heuristic catches the cheap wrappers and the rest belongs to review
+and the scanning models themselves. Recorded in DESIGN.md Open issues.
 """
 
 from __future__ import annotations
@@ -19,6 +38,8 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import math
+import re
 import sys
 from pathlib import Path
 
@@ -57,12 +78,67 @@ def canonical_text() -> str:
     )
 
 
-def _tampered_violation(claude_md: Path, canonical: str, text: str) -> GateViolation:
-    """The block's first line is present but the block is not byte-identical."""
-    canonical_lines = canonical.splitlines()
-    lines = text.splitlines()
-    start = lines.index(canonical_lines[0])
-    found = lines[start : start + len(canonical_lines)]
+#: A near-copy is recognized when at least this share of the block's
+#: non-empty lines appear verbatim in the document.
+_OVERLAP_THRESHOLD = 0.5
+#: Live lines inspected directly above the block for neutralizing prose.
+_NEUTRALIZER_WINDOW = 5
+_NEUTRALIZER = re.compile(
+    r"\b(?:deprecated?|does not apply|disregard(?:ed)?|ignored?|obsolete|superseded?)\b",
+    re.IGNORECASE,
+)
+
+#: (1-based original line number, line text) — a line a reader actually sees.
+_LiveLine = tuple[int, str]
+
+
+def _live_lines(lines: list[str]) -> list[_LiveLine]:
+    """Lines a reader sees: HTML-comment regions and fenced code are dropped."""
+    live: list[_LiveLine] = []
+    in_comment = False
+    in_fence = False
+    for number, line in enumerate(lines, start=1):
+        if in_fence:
+            in_fence = not line.lstrip().startswith("```")
+            continue
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = True
+            continue
+        if "<!--" in line and "-->" not in line.split("<!--", 1)[1]:
+            in_comment = True
+            continue
+        live.append((number, line))
+    return live
+
+
+def _find_block(canonical_lines: list[str], live: list[_LiveLine]) -> list[int]:
+    """Start indices (into ``live``) of byte-identical occurrences of the block."""
+    texts = [line for _, line in live]
+    width = len(canonical_lines)
+    return [i for i in range(len(texts) - width + 1) if texts[i : i + width] == canonical_lines]
+
+
+def _near_match_start(canonical_lines: list[str], live: list[_LiveLine]) -> int | None:
+    """Best-aligned start of a recognizable near-copy, or None below threshold."""
+    significant = [line for line in canonical_lines if line.strip()]
+    texts = [line for _, line in live]
+    present = set(texts)
+    matched = [line for line in significant if line in present]
+    if len(matched) < math.ceil(len(significant) * _OVERLAP_THRESHOLD):
+        return None
+    first = matched[0]
+    return max(0, texts.index(first) - canonical_lines.index(first))
+
+
+def _tampered_violation(
+    claude_md: Path, canonical_lines: list[str], live: list[_LiveLine], start: int
+) -> GateViolation:
+    """A recognizable near-copy of the block is present but not byte-identical."""
+    found = [line for _, line in live[start : start + len(canonical_lines)]]
     diff = "\n".join(
         difflib.unified_diff(
             canonical_lines,
@@ -76,8 +152,52 @@ def _tampered_violation(claude_md: Path, canonical: str, text: str) -> GateViola
         code="STICKY_INTRO_TAMPERED",
         message="the sticky intro was edited in place (chewed gum) — it must be byte-identical",
         path=str(claude_md),
-        line=start + 1,
+        line=live[start][0],
         context={"diff": diff},
+    )
+
+
+def _salience_violations(
+    claude_md: Path, canonical_lines: list[str], live: list[_LiveLine], occurrences: list[int]
+) -> list[GateViolation]:
+    """The block is present and pristine; presence still is not salience."""
+    path = str(claude_md)
+    start = occurrences[0]
+    if len(occurrences) > 1:
+        return [_duplicated(path, "the canonical block appears more than once")]
+    leftover = live[:start] + live[start + len(canonical_lines) :]
+    heading = canonical_lines[0]
+    if any(line == heading for _, line in leftover) or (
+        _near_match_start(canonical_lines, leftover) is not None
+    ):
+        return [
+            _duplicated(
+                path,
+                "a second (possibly contradictory) copy of the block exists "
+                "alongside the canonical one",
+            )
+        ]
+    window = live[max(0, start - _NEUTRALIZER_WINDOW) : start]
+    if any(_NEUTRALIZER.search(line) for _, line in window):
+        return [
+            GateViolation(
+                code="STICKY_INTRO_NEUTRALIZED",
+                message=(
+                    "the sticky intro is preceded by neutralizing prose "
+                    "(deprecated / does not apply / ignore) — presence is not salience"
+                ),
+                path=path,
+                line=live[start][0],
+            )
+        ]
+    return []
+
+
+def _duplicated(path: str, detail: str) -> GateViolation:
+    return GateViolation(
+        code="STICKY_INTRO_DUPLICATED",
+        message=f"the sticky intro must appear exactly once: {detail}",
+        path=path,
     )
 
 
@@ -91,12 +211,29 @@ def check(claude_md: Path) -> list[GateViolation]:
                 path=str(claude_md),
             )
         ]
-    canonical = canonical_text()
-    text = _normalize(claude_md.read_text(encoding="utf-8"))
-    if canonical in text:
-        return []
-    if canonical.splitlines()[0] in text.splitlines():
-        return [_tampered_violation(claude_md, canonical, text)]
+    canonical_lines = canonical_text().splitlines()
+    raw_lines = _normalize(claude_md.read_text(encoding="utf-8")).splitlines()
+    live = _live_lines(raw_lines)
+    occurrences = _find_block(canonical_lines, live)
+    if occurrences:
+        return _salience_violations(claude_md, canonical_lines, live, occurrences)
+    near = _near_match_start(canonical_lines, live)
+    if near is not None:
+        return [_tampered_violation(claude_md, canonical_lines, live, near)]
+    raw_pairs = list(enumerate(raw_lines, start=1))
+    if _find_block(canonical_lines, raw_pairs) or (
+        _near_match_start(canonical_lines, raw_pairs) is not None
+    ):
+        return [
+            GateViolation(
+                code="STICKY_INTRO_BURIED",
+                message=(
+                    "the sticky intro sits inside an HTML comment or fenced code "
+                    "block — carried in bytes, invisible to a reader; it teaches nothing"
+                ),
+                path=str(claude_md),
+            )
+        ]
     return [
         GateViolation(
             code="STICKY_INTRO_ABSENT",
@@ -115,12 +252,18 @@ def _mounted_text(existing: str, canonical: str) -> str:
 
 
 def mount(claude_md: Path) -> bool:
-    """Append the canonical block when absent. Returns True iff it wrote."""
+    """Append the canonical block when absent. Returns True iff it wrote.
+
+    Refuses on ANY recognizable near-copy (heading chewed or not) so a
+    tampered block is never silently duplicated or papered over.
+    """
     canonical = canonical_text()
+    canonical_lines = canonical.splitlines()
     existing = _normalize(claude_md.read_text(encoding="utf-8")) if claude_md.is_file() else ""
-    if canonical in existing:
+    live = _live_lines(existing.splitlines())
+    if _find_block(canonical_lines, live):
         return False  # already mounted byte-identical — no-op
-    if canonical.splitlines()[0] in existing.splitlines():
+    if _near_match_start(canonical_lines, live) is not None:
         raise GateError(
             code="STICKY_MOUNT_TAMPERED",
             message="refusing to mount over a tampered sticky intro — fix the chewed block first",

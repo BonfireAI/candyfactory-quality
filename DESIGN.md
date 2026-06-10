@@ -142,14 +142,28 @@ new file may carry `{"purpose": "one-line"}` in `files`, exempting it from
 the package draw while it still obeys the 500-line new-file cap — so a split
 is a visible, reviewed declaration, never silence.
 
+*Hardened 2026-06-10 (second refuter pass):* the unit of measure was
+physical lines — trivially compressible. The refuter re-flowed 900 real
+statements onto 300 `;`-joined lines against a 700-line freeze and the gate
+reported a SHRINK while a new 380-line sibling spent the freed headroom
+(+83% real content reported as shrink). Every draw is now anchored to
+`measure_file` = **max(physical lines, logical statements)** — re-flowing
+cannot manufacture headroom, and an unparseable `.py` is a typed gate error,
+never a silent line-count fallback.
+
 *Residue:* the `purpose` declaration is written by the same PR it excuses —
 review-visible (a `file-budget.json` diff) but not approver-gated like
 `exemptions.json` entries. The sticky intro carries the human-side doctrine:
 *"splitting a file is design, not evasion — the gate measures, review
-judges."*
+judges."* And the package draw is RELOCATION-ONLY: `init` seeds a package
+total only for directories already holding a >500 offender, so a greenfield
+burn authoring many sub-500 siblings in a fresh package never draws against
+a package ceiling (refuter attack 2) — disclosed in the module docstring and
+filed in §5.
 
-**Verdict:** CLOSED mechanically, the purpose-declaration residue
-review-carried.
+**Verdict:** CLOSED mechanically for relocation and compression; the
+greenfield-package boundary and the purpose-declaration residue are on the
+open record.
 
 ### 4.2 CC laundering
 
@@ -186,12 +200,26 @@ self-issued suppression is not an exemption"); gated suppressions with NO
 ratcheted: `frozen_count` must cover the entry count; additions require
 bumping it — printed loudly on every run, a visible decision, never silent.
 
-*Residue:* (a) the `approver` field is a string; its authenticity is carried
-by PR review of the `exemptions.json` diff, not by signature. (b) Only C901
-and PLR0915 noqa codes are registry-gated in v0 — a `# noqa: S603` is policed
-by ruff's required-reason idiom and review, not by the registry (§5).
+*Hardened 2026-06-10 (second refuter pass):* (a) a bare CODELESS `# noqa`
+was strictly more powerful than any coded one (ruff honors it as a blanket
+suppression) and was invisible to both the registry and the gauge — it now
+fails `BARE_NOQA` in cf-exemptions AND PGH004/RUF100 in the ruff gauge.
+(b) the registry-gated set was only C901/PLR0915 while the gauge's security
+(S) and Elegance (BLE) batteries were suppressible with no entry and no
+reason — the whole S and BLE families are now registry-gated, and the kit
+registers its own S603 in its own `exemptions.json` (self-policing).
+(c) symbols are matched by QUALIFIED name (`ClassA.run`) and an entry
+covering more than one live suppression fails `EXEMPTION_ENTRY_OVERLOADED`
+— N same-named suppressions can no longer collapse onto one frozen entry.
+(d) the measured surface is discovered (src/ when present, else top-level
+packages and modules), so a flat/app layout is measured, never a no-op.
 
-**Verdict:** CLOSED for the form budgets; the named residues are tracked.
+*Residue:* the `approver` field is a string; its authenticity is carried by
+PR review of the `exemptions.json` diff, not by signature. Style/import noqa
+codes (E/F/I/UP/B) remain ungated by the registry — ruff + review carry them.
+
+**Verdict:** CLOSED for the form, security, and Elegance batteries; the
+approver-authenticity residue is review-carried.
 
 ### 4.4 jscpd untouched-file blind spot
 
@@ -332,13 +360,21 @@ drift closure available today is `cf-mirror-check`: the mount runbook (§3
 step 3) recommends declaring the vendored `ruff.toml` in `MIRRORS.md`, after
 which any byte of drift from the declared hash fails the build.
 
-*What v0 does not ship:* a `ruff-sync check` step (the tool is not in the
-workflow or the dev deps), an allowlist auditor for exclude paths, or
-anything that FORCES the mirror declaration — a consumer that vendors a
-weakened copy and declares nothing passes ruff against its own weak gauge.
+*Hardened 2026-06-10 (second refuter pass):* the workflow's presence-only
+assert accepted a hollowed `ruff.toml` (`select=["F"]`) and graded the
+consumer against its own weak gauge. The gated `ruff check` / `ruff format`
+now run with `--config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"`
+— the kit checkout at the pinned SHA, the same doctrine as the mypy step —
+so the consumer's vendored copy serves local dev only and cannot weaken the
+graded verdict.
 
-**Verdict:** PARTIAL. Presence is asserted and a hash-gated path exists;
-content fidelity of the vendored gauge is not yet forced.
+*What v0 still does not ship:* a `ruff-sync check` step or an allowlist
+auditor for exclude paths; the vendored copy's drift is now cosmetic in CI
+but still misleads local runs unless mirror-declared.
+
+**Verdict:** CLOSED at CI altitude (the verdict rides the kit's pinned
+gauge); local-dev fidelity of the vendored copy stays mirror-declared,
+not forced.
 
 ### 4.10 De-annotation invisibility
 
@@ -411,15 +447,23 @@ half-declaration is no declaration); (c) a `pinned date` older than
 drift expires and must be re-affirmed or healed"*). `init` refuses to
 overwrite a live declaration.
 
+*Hardened 2026-06-10 (second refuter pass):* expiry was OPT-OUT twice over —
+omitting the `pinned date` column disabled staleness entirely (even at
+`--max-pin-age-days 0`), and a FUTURE date (2099-01-01) gave negative age so
+staleness could never fire. `pinned date` is now a REQUIRED column (missing
+column fails the header check; a blank cell fails the row as incomplete) and
+a forward-dated pin fails `MIRROR_PIN_FUTURE`. Expiry is unavoidable: with
+no parent fetch in v0, the pin clock is the backstop that keeps self-declared
+hashes from becoming permanently-legal drift.
+
 *Honest OPENs (stated in the module docstring):* cross-repo parent fetch is
 out of scope in v0 — the gate verifies the LOCAL side only; whether the
 pinned parent SHA still names real content, or the parent moved on, is
-unchecked (auth design unbuilt; Constable cadence). And a hole found while
-writing this document: `pinned date` is an OPTIONAL column — a row omitting
-it never expires, bypassing (c) entirely. Making it required is filed in §5.
+unchecked (auth design unbuilt; Constable cadence). And the gate checks only
+DECLARED rows — an undeclared mirror is invisible (§5).
 
-**Verdict:** PARTIAL. Legalization now costs bytes-pinning and (when dated)
-expires; the parent-side diff and the optional-date bypass are OPEN.
+**Verdict:** PARTIAL. Legalization now costs bytes-pinning and ALWAYS
+expires; the parent-side diff and undeclared-copy detection are OPEN.
 
 ### 4.13 Enrollment escape
 
@@ -474,22 +518,49 @@ Everything below is a known gap, on the record. Ordered by blood.
 9. **Required-status-check mounting + canary (§4.8)** — rulesets and the
    failing mount canary are procedure (runbook + Constable), not mechanism;
    caller-side `paths:` filters and `continue-on-error` stay invisible.
-10. **`MIRRORS.md` pinned-date optionality (§4.12)** — an undated row never
-    expires; the date should become a required column.
+10. **Undeclared mirrors (§4.12)** — the gate verifies only DECLARED rows;
+    a repo holding real cross-repo copies that simply never lists them is
+    green (refuter d8: an empty/template `MIRRORS.md` passes). The gate
+    trusts the repo's self-enumeration. Candidate closure: a fingerprint
+    scanner (filename/content match against known parent artifacts) flagging
+    likely-undeclared mirrors, on Constable cadence.
+    (The 2026-06-10 refuter's sibling holes — OPTIONAL pinned date and
+    FUTURE-dated pins — are CLOSED: the date column is required and a
+    forward-dated pin fails `MIRROR_PIN_FUTURE`.)
 11. **Cross-repo parent fetch (§4.12)** — stale-parent detection and the
     auth design for private parent repos: unbuilt; Constable cadence.
 12. **`type: ignore` volume ratchet (§4.10)** — not built; consumer
     per-module mypy overrides have no vehicle while CI uses the kit's config.
-13. **noqa registry coverage (§4.3)** — only C901/PLR0915 are
-    registry-gated; S/BLE noqa suppressions ride on ruff idiom + review.
+13. **Greenfield package growth (§4.1)** — the package draw is
+    relocation-only: it engages only for directories holding a >500 offender
+    at `init` time, so a greenfield burn authoring N sub-500 sibling files
+    in a fresh package is never package-budgeted (refuter attack 2: five
+    499-line `engine_*.py` siblings, 2495 lines, green). Bounded today by
+    the per-function gates + review; an aggregate per-directory ceiling
+    needs a measured anchor before it can be a budget (budgets are measured,
+    never invented). Disclosed in the module docstring, pinned by test.
 14. **Exemption entry swap (§4.11)** — `frozen_count` is a count; a 1-for-1
-    registry swap is review-visible, not machine-refused.
+    registry swap is review-visible, not machine-refused. (The collision
+    UNDERCOUNT is closed: qualified symbols + `EXEMPTION_ENTRY_OVERLOADED`
+    force a 1:1 entry-to-suppression map.)
 15. **Mutual recursion (`a -> b -> a`)** — `cf-recursion-check` detects
     genuine SELF-recursion only; call-graph cycles are a v2 feature, pinned
-    by tests as a declared limitation.
+    by tests as a declared limitation. Same family, same verdict for the
+    refuter's module-qualified self-call (`_self_mod.descend(n-1)` via
+    `sys.modules[__name__]`): genuine recursion needing dataflow analysis
+    this AST gate does not do — disclosed in the HONEST OPEN, pinned by
+    test. (The dynamic-class receivers `type(self).f` / `self.__class__.f`
+    ARE detected as of 2026-06-10.)
 16. **`file-budget` purpose self-service (§4.1)** — the declared-new-file
     escape is reviewed, not approver-gated; aligning it with the five-field
     `exemptions.json` shape is a candidate hardening.
+17. **Sticky-intro salience heuristic (§4.13, sticky-check)** — the
+    2026-06-10 hardening detects chewed headings, buried (HTML-comment /
+    fenced) copies, duplicates, and a keyword set of neutralizing wrappers
+    ("deprecated", "does not apply", "ignore", ...). Keyword salience is a
+    heuristic, not prose understanding: a paraphrased neutralizer passes the
+    gate. Full salience is a reading task — review and the scanning models
+    carry it; disclosed in the module docstring.
 
 ---
 

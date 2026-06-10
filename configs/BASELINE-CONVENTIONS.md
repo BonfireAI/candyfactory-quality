@@ -54,7 +54,10 @@ watermark. A function at-or-below its watermark passes.
 
 ## 2. mypy-baseline — the 0-new-type-errors gate (multiset set-difference)
 
-**Boot (day one):**
+**Boot (day one) — MANDATORY for any repo containing Python.** The gate
+REFUSES a Python repo with no `mypy-baseline.txt` (the 2026-06-10 refuter
+showed the old presence-conditioned skip made "0 new type errors" opt-in);
+a zero-error repo boots an empty baseline the same way.
 
 ```bash
 mypy src --config-file mypy-base.toml | mypy-baseline sync

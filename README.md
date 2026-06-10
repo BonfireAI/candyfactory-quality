@@ -25,7 +25,7 @@ whatever package the first agent downloaded.
 | `cf-sticky-check` | The repo carries the canonical sticky intro, byte-faithful to this kit's mirror. |
 | `cf-mirror-check` | Cross-repo copies are declared mirrors (`MIRRORS.md`); undeclared drift fails. |
 | `cf-recursion-check` | Recursion is declared with a stated bound, or it fails. |
-| `cf-exemptions` | Every `# noqa` / `# nosec` traces to a reasoned entry in `exemptions.json`; self-issued suppression fails. |
+| `cf-exemptions` | Gated suppressions — `# noqa: C901`/`PLR0915` (form), `# noqa: S###`/`# nosec B###` (security), `# noqa: BLE###` (Elegance) — trace to a reasoned entry in `exemptions.json`; bare/blanket and self-issued suppressions fail. Style codes (E/F/I/UP/B) ride on ruff + review. |
 
 Budgets are anchored to measurement, never invented: CC ≤ 10 per function,
 ≤ 50 statements per function, new files ≤ 500 lines, 0 new type errors. Existing

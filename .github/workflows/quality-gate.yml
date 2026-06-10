@@ -30,7 +30,11 @@ jobs:
     steps:
       # FIRST, before any checkout: self-assert the trigger context. A caller
       # stub that filters triggers (workflow_dispatch-only, schedule, etc.) is
-      # the refuter's neutering vector #1 — refuse it loudly.
+      # refused here. This closes the EVENT-TYPE variant of caller-stub
+      # neutering only (DESIGN §4.8, verdict PARTIAL): caller-side `paths:`
+      # filters, `continue-on-error` on the caller's job, and required-check
+      # mounting are invisible from inside a reusable workflow; those vectors
+      # remain procedural — mount runbook + mount canary + Constable sweep.
       - name: Self-assert trigger context (anti-neutering)
         working-directory: ${{ github.workspace }}
         env:
@@ -96,21 +100,25 @@ jobs:
           fi
 
       - name: Assert the vendored ruff gauge is present
-        # ruff with NO config falls back to defaults far weaker than the gauge —
-        # a consumer with no vendored config would pass a hollow lint. Refuse.
+        # Local-dev hygiene only: the consumer's vendored copy serves editors
+        # and pre-commit runs. The GATED verdict below rides the KIT's pinned
+        # gauge directly — the refuter showed a hollowed vendored copy passed
+        # this presence-only assert while neutering the battery, so presence
+        # is asserted but fidelity is no longer trusted.
         run: |
           if [ ! -f ruff.toml ] && [ ! -f .ruff.toml ] && ! grep -q '^\[tool\.ruff' pyproject.toml 2>/dev/null; then
             echo "::error::no vendored ruff gauge found (ruff.toml / .ruff.toml / [tool.ruff]) — vendor configs/ruff-base.toml per the kit README"
             exit 1
           fi
 
-      - name: ruff check (vendored ruff config)
-        # ruff discovers the consumer's VENDORED copy of configs/ruff-base.toml
-        # (drift between the copy and the gauge is the ruff-sync/Constable beat).
-        run: ruff check .
+      - name: ruff check (the kit's pinned gauge, never the consumer copy)
+        # Same doctrine as mypy below: the config the verdict is graded by
+        # comes from the kit checkout at the pinned SHA, so a consumer cannot
+        # weaken the gauge it is graded by (hollow-vendored-copy refusal).
+        run: ruff check . --config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"
 
-      - name: ruff format --check
-        run: ruff format --check .
+      - name: ruff format --check (the kit's pinned gauge)
+        run: ruff format --check . --config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"
 
       - name: cf-sticky-check — the sticky intro is mounted, byte-faithful
         run: cf-sticky-check check .
@@ -132,15 +140,26 @@ jobs:
       - name: cf-exemptions — every suppression traces to a reasoned entry
         run: cf-exemptions
 
-      - name: mypy through the baseline ratchet (skip-if-no-baseline)
+      - name: mypy through the baseline ratchet (a Python repo MUST carry a baseline)
         # The pipe is the design: mypy exits nonzero whenever baselined debt
         # exists; mypy-baseline filter is the gate (0 new errors), so the step
         # gates on the LAST command — deliberately no pipefail here.
+        # The refuter showed "0 new type errors" was opt-in by file presence:
+        # no mypy-baseline.txt meant NO type checking and a green gate. Now a
+        # repo containing Python REFUSES to pass without a baseline (boot one
+        # even at zero errors); only a Python-free repo may skip, visibly.
+        # The measured target is discovered (src/ when present, else the repo
+        # root) so a flat layout cannot escape via the hardcoded `src`.
         run: |
           if [ -f mypy-baseline.txt ]; then
-            mypy src --config-file "$GITHUB_WORKSPACE/.cf-quality/configs/mypy-base.toml" | mypy-baseline filter
+            TARGET=.
+            if [ -d src ]; then TARGET=src; fi
+            mypy "$TARGET" --config-file "$GITHUB_WORKSPACE/.cf-quality/configs/mypy-base.toml" | mypy-baseline filter
+          elif find . -name '*.py' -not -path '*/.*' | grep -q .; then
+            echo "::error::mypy ratchet REFUSED — Python files present but no mypy-baseline.txt; boot the baseline per configs/BASELINE-CONVENTIONS.md (mypy src | mypy-baseline sync), even at zero errors"
+            exit 1
           else
-            echo "::notice::mypy ratchet SKIPPED — no mypy-baseline.txt; boot it per configs/BASELINE-CONVENTIONS.md (mypy src | mypy-baseline sync)"
+            echo "::notice::mypy ratchet SKIPPED — no Python files in this repo"
           fi
 
       - name: pytest

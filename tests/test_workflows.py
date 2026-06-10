@@ -266,3 +266,39 @@ def test_sha_pin_doctrine_is_ten_lines_and_names_the_mechanisms() -> None:
     assert len(lines) <= 10, "the doctrine is a 10-line document"
     assert "Dependabot" in text
     assert "40-hex" in text or "full commit SHA" in text
+
+
+# --- refuter pass: workflow-altitude fixes ------------------------------------
+
+
+def test_gate_mypy_refuses_python_repo_without_baseline() -> None:
+    # Refuter: a missing mypy-baseline.txt skipped type checking entirely —
+    # "0 new type errors" was opt-in by file presence. A Python repo with no
+    # baseline must FAIL; the visible skip remains only for Python-free repos.
+    script = _run_script(_load(GATE_PATH), "gate")
+    mypy_part = script[script.find("mypy-baseline.txt") :]
+    assert "::error::" in mypy_part, "a Python repo without a baseline must fail loudly"
+    assert "exit 1" in mypy_part
+    assert "::notice::" in mypy_part, "the Python-free skip stays visible"
+
+
+def test_gate_mypy_targets_discovered_layout() -> None:
+    # Flat-layout consumers must not escape the type gate via a hardcoded `src`.
+    script = _run_script(_load(GATE_PATH), "gate")
+    mypy_part = script[script.find("mypy-baseline.txt") :]
+    assert "[ -d src ]" in mypy_part
+
+
+def test_gate_ruff_runs_against_the_kit_pinned_gauge() -> None:
+    # Refuter: a hollow vendored ruff.toml passed the presence-only assert and
+    # neutered the battery. CI now grades by the kit checkout's own gauge.
+    script = _run_script(_load(GATE_PATH), "gate")
+    kit_config = '--config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"'
+    assert script.count(kit_config) >= 2, "both ruff check and ruff format ride the kit gauge"
+
+
+def test_gate_self_assert_comment_matches_partial_verdict() -> None:
+    # Refuter: the inline comment overclaimed ("refuse it loudly — neutering
+    # vector #1") versus DESIGN §4.8's honest PARTIAL.
+    text = GATE_PATH.read_text(encoding="utf-8")
+    assert "remain procedural" in text, "the self-assert comment must state the PARTIAL residue"

@@ -85,3 +85,35 @@ def test_no_internal_ticket_references() -> None:
     assert not re.search(r"\bBON-\d+", _design_text()), (
         "DESIGN.md must not carry internal ticket references"
     )
+
+
+def test_refuter_2026_06_10_boundaries_are_on_the_open_record() -> None:
+    # The second refuter pass found v0 boundaries that are decisions, not
+    # silence: each one is named in DESIGN.md's Open issues.
+    text = DESIGN_PATH.read_text(encoding="utf-8")
+    open_section = text[text.lower().index("## 5. open issues") :].lower()
+    for needle in (
+        "greenfield",  # package draw is relocation-only; greenfield dumps unbudgeted
+        "module-qualified",  # sys.modules[__name__] self-recursion undetected
+        "undeclared mirror",  # MIRRORS.md trusts the repo's self-enumeration
+        "parent fetch",  # local-side-only mirror verification
+        "salience",  # sticky-intro neutralizer detection is a heuristic
+    ):
+        assert needle in open_section, f"open-issue entry missing: {needle}"
+
+
+def test_design_drops_the_false_required_reason_idiom_claim() -> None:
+    # Refuter: DESIGN claimed the S603 suppression is "policed by ruff's
+    # required-reason idiom" — no such idiom exists or is enabled.
+    text = DESIGN_PATH.read_text(encoding="utf-8")
+    assert "required-reason idiom" not in text
+
+
+def test_readme_states_the_gated_suppression_families_precisely() -> None:
+    # Refuter: README overclaimed that EVERY noqa/nosec traces to a reasoned
+    # entry while only C901/PLR0915 were gated. The claim must name the gated
+    # families exactly (form + security + Elegance).
+    readme = (DESIGN_PATH.parent / "README.md").read_text(encoding="utf-8")
+    assert "Every `# noqa` / `# nosec` traces" not in readme
+    for fragment in ("C901", "PLR0915", "S", "BLE"):
+        assert fragment in readme

@@ -278,6 +278,93 @@ def test_call_only_inside_nested_def_does_not_flag_outer(tmp_path: Path) -> None
     assert violations == []
 
 
+# --- dynamic-class receivers: genuine self-recursion, refuter evasions A/B ---
+
+
+def test_type_self_receiver_recursion_fails(tmp_path: Path) -> None:
+    # Refuter evasion A: type(self).walk(self, n-1) resolves to the method itself.
+    violations = _scan(
+        tmp_path,
+        """
+        class Walker:
+            def walk(self, n):
+                if n <= 0:
+                    return 0
+                return type(self).walk(self, n - 1)
+        """,
+    )
+    assert [v.code for v in violations] == ["RECURSION_UNDECLARED"]
+    assert violations[0].context["function"] == "Walker.walk"
+
+
+def test_dunder_class_receiver_recursion_fails(tmp_path: Path) -> None:
+    # Refuter evasion B: self.__class__.crawl(self, n-1) resolves to the method itself.
+    violations = _scan(
+        tmp_path,
+        """
+        class Spider:
+            def crawl(self, n):
+                if n <= 0:
+                    return 0
+                return self.__class__.crawl(self, n - 1)
+        """,
+    )
+    assert [v.code for v in violations] == ["RECURSION_UNDECLARED"]
+    assert violations[0].context["function"] == "Spider.crawl"
+
+
+def test_type_self_recursion_with_declared_bound_passes(tmp_path: Path) -> None:
+    violations = _scan(
+        tmp_path,
+        """
+        class Walker:
+            # recursion: bounded by n, strictly decreasing to 0
+            def walk(self, n):
+                if n <= 0:
+                    return 0
+                return type(self).walk(self, n - 1)
+        """,
+    )
+    assert violations == []
+
+
+def test_type_of_other_object_is_not_recursion(tmp_path: Path) -> None:
+    # type(other).walk(...) dispatches on a foreign object's class — not self.
+    violations = _scan(
+        tmp_path,
+        """
+        class Walker:
+            def walk(self, other, n):
+                return type(other).walk(other, n - 1)
+        """,
+    )
+    assert violations == []
+
+
+def test_module_qualified_self_call_is_documented_open_not_detected(tmp_path: Path) -> None:
+    # Refuter evasion C: descend reached through sys.modules[__name__] is
+    # genuine unbounded self-recursion this gate does NOT see (static dataflow
+    # to the module object is out of scope). Pinned as a DISCLOSED limitation.
+    violations = _scan(
+        tmp_path,
+        """
+        import sys
+
+        _self_mod = sys.modules[__name__]
+
+        def descend(n):
+            if n <= 0:
+                return 0
+            return _self_mod.descend(n - 1)
+        """,
+    )
+    assert violations == []
+    import cf_quality.recursion_check as rc
+
+    assert rc.__doc__ is not None
+    assert "module-qualified" in rc.__doc__, "the evasion must be disclosed in the HONEST OPEN"
+
+
 # --- mutual recursion: honest v1 OPEN ----------------------------------------
 
 

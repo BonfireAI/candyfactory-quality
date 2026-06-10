@@ -11,8 +11,10 @@ What counts as GENUINE self-recursion (the name resolves to itself):
 - a module-level or nested function calling its own bare name, unless that
   name is shadowed by one of its own parameters (delegation);
 - a method calling itself through its own receiver (``self.f(...)`` /
-  ``cls.f(...)`` — the first parameter) or through its own class name
-  (``MyClass.f(...)`` inside ``MyClass.f``).
+  ``cls.f(...)`` — the first parameter), through its own class name
+  (``MyClass.f(...)`` inside ``MyClass.f``), or through its own dynamically
+  resolved class — ``type(self).f(...)`` and ``self.__class__.f(...)`` /
+  ``cls.__class__.f(...)`` (the refuter's dynamic-receiver evasions).
 
 What the Phase-A audit proved is NOT self-recursion (12 of 14 raw AST hits)
 and this gate therefore excludes:
@@ -29,6 +31,11 @@ HONEST OPEN (v1): mutual recursion (``a -> b -> a``) is NOT detected, and a
 call that reaches the enclosing function only through a nested ``def`` is
 treated as mutual-recursion-shaped and likewise not flagged. Detecting cycles
 through the call graph is a v2 feature; the limitation is pinned by tests.
+Also NOT detected (refuter evasion C, pinned by tests): a module-qualified
+self-call — ``mod.f(...)`` where ``mod`` is ``sys.modules[__name__]`` or an
+import of the enclosing module itself. Resolving which names alias the module
+object requires dataflow analysis this AST gate does not do; the evasion is
+declared here rather than silently missed.
 
 Exit codes: 0 clean · 1 violations found · 2 the gate itself could not run
 (typed :class:`~cf_quality.errors.GateError` on stderr).
@@ -100,6 +107,25 @@ def _self_receivers(fn: _FunctionNode, class_name: str) -> set[str]:
     return receivers
 
 
+def _is_own_class_receiver(node: ast.expr, receivers: set[str]) -> bool:
+    """``type(self)`` / ``self.__class__`` style receivers resolving to the method's class."""
+    if isinstance(node, ast.Call):
+        return (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "type"
+            and len(node.args) == 1
+            and not node.keywords
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in receivers
+        )
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "__class__"
+        and isinstance(node.value, ast.Name)
+        and node.value.id in receivers
+    )
+
+
 def _is_self_call(call: ast.Call, fn: _FunctionNode, class_name: str | None) -> bool:
     func = call.func
     if class_name is None:
@@ -109,14 +135,15 @@ def _is_self_call(call: ast.Call, fn: _FunctionNode, class_name: str | None) -> 
             and func.id == fn.name
             and fn.name not in _parameter_names(fn)
         )
-    # Method: only self.f(...) / cls.f(...) / MyClass.f(...) resolve to itself.
-    # super().f(...) has a Call receiver; obj.f(...) has a foreign Name receiver.
-    return (
-        isinstance(func, ast.Attribute)
-        and func.attr == fn.name
-        and isinstance(func.value, ast.Name)
-        and func.value.id in _self_receivers(fn, class_name)
-    )
+    # Method: self.f(...) / cls.f(...) / MyClass.f(...) resolve to itself, as
+    # do the dynamic-class receivers type(self).f(...) and self.__class__.f(...).
+    # super().f(...) has a super() Call receiver; obj.f(...) a foreign Name.
+    if not (isinstance(func, ast.Attribute) and func.attr == fn.name):
+        return False
+    receivers = _self_receivers(fn, class_name)
+    if isinstance(func.value, ast.Name):
+        return func.value.id in receivers
+    return _is_own_class_receiver(func.value, receivers)
 
 
 def _self_call_line(fn: _FunctionNode, class_name: str | None) -> int | None:

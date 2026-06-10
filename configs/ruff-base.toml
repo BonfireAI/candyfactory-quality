@@ -19,7 +19,10 @@ target-version = "py312"
 # C901 = cyclomatic budget · PLR0915 = statement budget (the form gates).
 # S = bandit security battery · BLE = blind-except ban (the Elegance Law's
 # "no swallowed exceptions" enforced at lint altitude).
-select = ["E", "F", "I", "UP", "B", "C901", "PLR0915", "S", "BLE"]
+# PGH004 = blanket (codeless) noqa fails · RUF100 = unused noqa fails — the
+# refuter showed a bare `# noqa` suppressed C901 with no lint backstop;
+# blanket suppression now fails here AND in cf-exemptions (BARE_NOQA).
+select = ["E", "F", "I", "UP", "B", "C901", "PLR0915", "S", "BLE", "PGH004", "RUF100"]
 
 [lint.mccabe]
 max-complexity = 10

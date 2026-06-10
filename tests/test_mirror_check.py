@@ -66,15 +66,18 @@ class TestParse:
         assert exc.value.code == "MIRRORS_HEADER_INVALID"
         assert "parent repo" in str(exc.value.context["missing_columns"])
 
-    def test_pinned_date_column_is_optional(self, tmp_path: Path) -> None:
+    def test_pinned_date_column_is_required(self, tmp_path: Path) -> None:
+        # Refuter: omitting the column disabled staleness entirely (expiry was
+        # opt-out). A declaration without an expiry clock is no declaration.
         header = (
             "| artifact | local path | parent repo | parent path "
             "| pinned parent SHA | content sha256 |\n|---|---|---|---|---|---|\n"
         )
         write_mirrors(tmp_path, "| a | b.md | c | d.md | e | f |\n", header=header)
-        rows = parse_mirrors((tmp_path / "MIRRORS.md").read_text(encoding="utf-8"))
-        assert len(rows) == 1
-        assert rows[0].pinned_date is None
+        with pytest.raises(GateError) as exc:
+            parse_mirrors((tmp_path / "MIRRORS.md").read_text(encoding="utf-8"))
+        assert exc.value.code == "MIRRORS_HEADER_INVALID"
+        assert "pinned date" in str(exc.value.context["missing_columns"])
 
 
 class TestCheck:
@@ -102,7 +105,9 @@ class TestCheck:
 
     def test_row_missing_any_field_fails(self, tmp_path: Path) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
-        incomplete = f"| sticky-intro | data/intro.md |  | d.md | {'a' * 40} | {digest} | |\n"
+        incomplete = (
+            f"| sticky-intro | data/intro.md |  | d.md | {'a' * 40} | {digest} | 2026-06-01 |\n"
+        )
         write_mirrors(tmp_path, incomplete)
         violations = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_ROW_INCOMPLETE"]
@@ -130,10 +135,30 @@ class TestCheck:
         violations = check_mirrors(tmp_path, max_pin_age_days=7, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_PIN_STALE"]
 
-    def test_row_without_pinned_date_is_never_stale(self, tmp_path: Path) -> None:
+    def test_row_with_empty_pinned_date_is_incomplete(self, tmp_path: Path) -> None:
+        # Refuter: a blank pin made a declaration immortal (expiry opt-out).
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=""))
-        assert check_mirrors(tmp_path, today=TODAY) == []
+        violations = check_mirrors(tmp_path, today=TODAY)
+        assert [v.code for v in violations] == ["MIRROR_ROW_INCOMPLETE"]
+        assert "pinned date" in violations[0].context["missing_fields"]
+
+    def test_future_pinned_date_fails_as_future(self, tmp_path: Path) -> None:
+        # Refuter: a 2099 pin gave negative age, so staleness could never fire.
+        digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
+        write_mirrors(tmp_path, row("data/intro.md", digest, pinned="2099-01-01"))
+        violations = check_mirrors(tmp_path, today=TODAY)
+        assert [v.code for v in violations] == ["MIRROR_PIN_FUTURE"]
+        assert violations[0].context["pinned_date"] == "2099-01-01"
+
+    def test_max_pin_age_zero_expires_every_dated_pin_but_today(self, tmp_path: Path) -> None:
+        digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
+        yesterday = (TODAY - dt.timedelta(days=1)).isoformat()
+        write_mirrors(tmp_path, row("data/intro.md", digest, pinned=yesterday))
+        violations = check_mirrors(tmp_path, max_pin_age_days=0, today=TODAY)
+        assert [v.code for v in violations] == ["MIRROR_PIN_STALE"]
+        write_mirrors(tmp_path, row("data/intro.md", digest, pinned=TODAY.isoformat()))
+        assert check_mirrors(tmp_path, max_pin_age_days=0, today=TODAY) == []
 
     def test_unparseable_pinned_date_fails_as_invalid(self, tmp_path: Path) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")

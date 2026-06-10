@@ -3,18 +3,36 @@
 Answers the Law-2 refuter's "self-issued Wizard exemption" gaming vector by
 making Wizard-gating mechanical, never prose:
 
-(a) a bare ``# nosec`` (no rule id AND no reason) anywhere in src/ FAILS;
-(b) every gated suppression — ``# noqa: C901``, ``# noqa: PLR0915``, or
-    ``# nosec B...`` — must match a committed entry in ``exemptions.json``
-    ({file, symbol_or_line, rule, reason, approver}); an unregistered
-    suppression FAILS the gate;
+(a) a bare ``# nosec`` (no rule id AND no reason) FAILS, and so does a bare
+    codeless ``# noqa`` (``BARE_NOQA``) — ruff honors a codeless noqa as a
+    BLANKET suppression, strictly more powerful than any coded one (the
+    refuter's bare-noqa bypass); it names no rule, so no registry entry can
+    cover it. The ruff gauge independently selects PGH004/RUF100 so blanket
+    and unused noqa also fail at lint altitude;
+(b) every gated suppression must match a committed entry in
+    ``exemptions.json`` ({file, symbol_or_line, rule, reason, approver}); an
+    unregistered suppression FAILS the gate. Gated families: the form budgets
+    (``# noqa: C901`` / ``# noqa: PLR0915``), the security battery
+    (``# noqa: S###`` and ``# nosec B###``), and the Elegance Law's
+    blind-except ban (``# noqa: BLE###``) — everything the gauge selects as a
+    security or honesty gate, per the refuter's S602/BLE001 bypass. Other
+    noqa codes (style/imports: E/F/I/UP/B) ride on ruff + review;
 (c) the exemption count is ratcheted: ``exemptions.json`` carries
     ``frozen_count``. Entries may be removed freely; additions require
     bumping ``frozen_count``, and the gate prints the ratchet loudly on
-    every run — a visible decision, never a silent one;
+    every run — a visible decision, never a silent one. Symbols are matched
+    by QUALIFIED name (``ClassA.run``, never bare ``run``), and an entry
+    matching more than one live suppression fails
+    (``EXEMPTION_ENTRY_OVERLOADED``) — the refuter's name-collision attack
+    collapsed N same-named suppressions onto one frozen entry;
 (d) fold-in wrappers: when the target repo ships ``scripts/check_english.py``
     or ``scripts/check_host_free.py`` the gate runs them and propagates
     their exit codes; absent scripts are skipped silently.
+
+The measured surface is ``<root>/src`` when it exists; otherwise the layout
+is DISCOVERED (top-level packages/modules outside tests/docs/scripts), so a
+flat or app layout is measured, never a silent no-op (the refuter's
+src-only escape).
 
 Comments are read via :mod:`tokenize` (COMMENT tokens only), so suppression
 text inside string literals never trips the gate.
@@ -26,7 +44,7 @@ import argparse
 import ast
 import json
 import re
-import subprocess  # noqa: S404 — fold-in scripts run via sys.executable, fixed argv, no shell
+import subprocess  # fold-in scripts run via sys.executable, fixed argv, no shell (S603 gated below)
 import sys
 import tokenize
 from dataclasses import dataclass
@@ -36,7 +54,26 @@ from typing import Any
 from cf_quality.errors import GateError, GateViolation
 
 GATED_NOQA_RULES = frozenset({"C901", "PLR0915"})
+#: Whole rule families that are registry-gated code-by-code: the ruff-ported
+#: bandit battery (S###) and the Elegance Law's blind-except ban (BLE###).
+_GATED_FAMILY_RE = re.compile(r"^(?:S|BLE)\d+$")
 FOLD_IN_SCRIPTS = ("check_english.py", "check_host_free.py")
+#: Directories never measured for suppressions (tests carry their own
+#: per-file-ignores discipline; the rest is non-shipping surface).
+EXCLUDED_SCAN_DIRS = frozenset(
+    {
+        "tests",
+        "test",
+        "docs",
+        "examples",
+        "scripts",
+        "__pycache__",
+        "node_modules",
+        "build",
+        "dist",
+        "venv",
+    }
+)
 REQUIRED_ENTRY_KEYS = ("file", "symbol_or_line", "rule", "reason", "approver")
 
 _NOSEC_RE = re.compile(r"#\s*nosec\b(.*)")
@@ -70,18 +107,28 @@ def _comment_tokens(file_path: Path) -> list[tuple[int, str]]:
 
 
 def _symbol_spans(file_path: Path) -> list[tuple[int, int, str]]:
-    """(start, end, name) spans of every def/class; empty when unparsable (line match only)."""
+    """(start, end, QUALIFIED name) spans of every def/class.
+
+    Names are dotted paths (``Outer.run``), never bare names — the refuter
+    showed that bare names let N same-named suppressions collapse onto one
+    registry entry. Empty when unparsable (line match only).
+    """
     try:
         tree = ast.parse(file_path.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError):
         return []
     spans: list[tuple[int, int, str]] = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-            and node.end_lineno is not None
-        ):
-            spans.append((node.lineno, node.end_lineno, node.name))
+    pending: list[tuple[ast.AST, str]] = [(tree, "")]
+    while pending:
+        node, prefix = pending.pop()
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                qualname = f"{prefix}{child.name}"
+                if child.end_lineno is not None:
+                    spans.append((child.lineno, child.end_lineno, qualname))
+                pending.append((child, f"{qualname}."))
+            else:
+                pending.append((child, prefix))
     return spans
 
 
@@ -120,25 +167,63 @@ def _classify_comment(
     if noqa and noqa.group(1):
         codes = _CODE_SPLIT_RE.split(noqa.group(1).strip())
         suppressions.extend(
-            Suppression(rel_path, line, code, symbol) for code in codes if code in GATED_NOQA_RULES
+            Suppression(rel_path, line, code, symbol) for code in codes if _is_gated_code(code)
+        )
+    elif noqa:
+        violations.append(
+            GateViolation(
+                code="BARE_NOQA",
+                message=(
+                    "codeless '# noqa' is a blanket suppression (ruff silences "
+                    "EVERY rule on the line) — name the rule and register it"
+                ),
+                path=rel_path,
+                line=line,
+            )
         )
     return suppressions, violations
 
 
-def _scan_src(root: Path) -> tuple[list[Suppression], list[GateViolation]]:
-    """Scan every Python file under <root>/src for suppression comments."""
+def _is_gated_code(code: str) -> bool:
+    """Form budgets plus the whole S and BLE families are registry-gated."""
+    return code in GATED_NOQA_RULES or _GATED_FAMILY_RE.match(code) is not None
+
+
+def _discover_scan_paths(root: Path) -> list[Path]:
+    """``src/`` when present; otherwise every top-level Python location.
+
+    A flat or app layout is measured, never a silent no-op: top-level
+    ``*.py`` files and every non-excluded directory holding Python count.
+    """
     src = root / "src"
-    if not src.is_dir():
-        return [], []
+    if src.is_dir():
+        return [src]
+    paths: list[Path] = []
+    for child in sorted(root.iterdir()):
+        if child.name.startswith(".") or child.name in EXCLUDED_SCAN_DIRS:
+            continue
+        if child.is_file() and child.suffix == ".py":
+            paths.append(child)
+        elif child.is_dir() and any(child.rglob("*.py")):
+            paths.append(child)
+    return paths
+
+
+def _scan_src(root: Path) -> tuple[list[Suppression], list[GateViolation]]:
+    """Scan the discovered Python surface for suppression comments."""
     suppressions: list[Suppression] = []
     violations: list[GateViolation] = []
-    for file_path in sorted(src.rglob("*.py")):
-        rel_path = file_path.relative_to(root).as_posix()
-        spans = _symbol_spans(file_path)
-        for line, text in _comment_tokens(file_path):
-            found, broken = _classify_comment(rel_path, line, text, _enclosing_symbol(spans, line))
-            suppressions.extend(found)
-            violations.extend(broken)
+    for base in _discover_scan_paths(root):
+        files = [base] if base.is_file() else sorted(base.rglob("*.py"))
+        for file_path in files:
+            rel_path = file_path.relative_to(root).as_posix()
+            spans = _symbol_spans(file_path)
+            for line, text in _comment_tokens(file_path):
+                found, broken = _classify_comment(
+                    rel_path, line, text, _enclosing_symbol(spans, line)
+                )
+                suppressions.extend(found)
+                violations.extend(broken)
     return suppressions, violations
 
 
@@ -242,8 +327,26 @@ def check(root: Path) -> tuple[list[GateViolation], list[str]]:
             )
         return violations, ["no exemptions.json and no gated suppressions — nothing to register"]
     entries, frozen_count = config
+    violations.extend(_match_suppressions(suppressions, entries))
+    ratchet_violations, lines = _ratchet_report(len(entries), frozen_count)
+    violations.extend(ratchet_violations)
+    return violations, lines
+
+
+def _match_suppressions(
+    suppressions: list[Suppression], entries: list[dict[str, Any]]
+) -> list[GateViolation]:
+    """Every suppression needs an entry; every entry covers at most ONE.
+
+    The 1:1 discipline is the ratchet's truth condition: N suppressions
+    sharing one entry would keep ``frozen_count`` flat while live
+    suppressions grow (the refuter's collision undercount).
+    """
+    violations: list[GateViolation] = []
+    matched_counts = [0] * len(entries)
     for suppression in suppressions:
-        if not any(_matches(suppression, entry) for entry in entries):
+        hits = [i for i, entry in enumerate(entries) if _matches(suppression, entry)]
+        if not hits:
             violations.append(
                 GateViolation(
                     code="UNREGISTERED_SUPPRESSION",
@@ -256,9 +359,22 @@ def check(root: Path) -> tuple[list[GateViolation], list[str]]:
                     context={"rule": suppression.rule, "symbol": suppression.symbol},
                 )
             )
-    ratchet_violations, lines = _ratchet_report(len(entries), frozen_count)
-    violations.extend(ratchet_violations)
-    return violations, lines
+        for index in hits:
+            matched_counts[index] += 1
+    for index, count in enumerate(matched_counts):
+        if count > 1:
+            violations.append(
+                GateViolation(
+                    code="EXEMPTION_ENTRY_OVERLOADED",
+                    message=(
+                        f"exemptions.json entry {index} covers {count} live suppressions — "
+                        "each suppression needs its own reasoned entry (1:1, ratchet-true)"
+                    ),
+                    path="exemptions.json",
+                    context={"entry_index": index, "matched_suppressions": count},
+                )
+            )
+    return violations
 
 
 def _run_fold_ins(root: Path) -> tuple[list[str], int]:

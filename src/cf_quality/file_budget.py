@@ -7,16 +7,33 @@ review, and the per-package LOC budgets below close the sibling-file
 relocation of the same accretion (a 499-line ``handle_extra.py`` next to a
 frozen ``handle.py`` draws against the package's frozen total and FAILS).
 
+The unit of measure is COMPRESSION-RESISTANT (the refuter's statement-joining
+attack): every draw is anchored to ``max(physical lines, logical statements)``
+(``measure_file``). Re-flowing 900 statements onto 300 ``;``-joined physical
+lines still measures 900 — a "shrink" cannot be manufactured by compressing
+the same code onto fewer lines, and the freed headroom cannot be spent on
+real new-code accretion. An unparseable .py file is a typed gate error,
+never a silent line-count fallback.
+
 Three rules, all anchored to ``file-budget.json``:
 
-1. **New files** (not in the baseline) may not exceed 500 lines.
-2. **Frozen files** (``path -> measured line count``) may only shrink:
+1. **New files** (not in the baseline) may not exceed 500 (measured) lines.
+2. **Frozen files** (``path -> measured size``) may only shrink:
    current > frozen fails; current < frozen passes with a shrink notice.
-3. **Baselined packages** (``dir -> frozen LOC total``, recursive) may not
+3. **Baselined packages** (``dir -> frozen size total``, recursive) may not
    grow: every undeclared .py file under the dir draws against the total.
    A new file may be *declared* with ``{"purpose": "one-line"}`` —
    declared-not-banned — which exempts it from the package draw while it
    still obeys the 500-line new-file cap.
+
+HONEST OPEN (v0, disclosed per the refuter's greenfield finding): the package
+draw is RELOCATION-ONLY. ``init`` baselines a package total only for
+directories already holding a >500 offender, so a greenfield burn that
+authors many sub-500 sibling files in a fresh package never draws against a
+package ceiling — that accretion is bounded by review and by the per-function
+gates (ruff C901/PLR0915), not by this gate. An aggregate per-directory
+ceiling would need a measured anchor this kit does not yet have (budgets are
+measured, never invented); the boundary is recorded in DESIGN.md Open issues.
 
 Exit codes: 0 clean · 1 violations (typed GateViolation report on stdout)
 · 2 the gate itself could not run (typed GateError on stderr).
@@ -25,6 +42,7 @@ Exit codes: 0 clean · 1 violations (typed GateViolation report on stdout)
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import sys
@@ -55,17 +73,48 @@ class Budget:
     packages: dict[str, int]
 
 
-def count_lines(path: Path) -> int:
-    """Count physical lines; raises a typed GateError when unreadable."""
+def _read_text(path: Path) -> str:
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         raise GateError(
             code="GATE_READ_FAILED",
             message=f"cannot read {path}: {exc}",
             context={"path": str(path)},
         ) from exc
-    return len(text.splitlines())
+
+
+def count_lines(path: Path) -> int:
+    """Count physical lines; raises a typed GateError when unreadable."""
+    return len(_read_text(path).splitlines())
+
+
+def count_statements(path: Path) -> int:
+    """Count logical statements (``ast.stmt`` nodes, nested included).
+
+    Raises a typed GateError when the file is unreadable or unparseable —
+    never a silent fallback to a gameable line count.
+    """
+    text = _read_text(path)
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except (SyntaxError, ValueError) as exc:
+        raise GateError(
+            code="GATE_SOURCE_UNPARSEABLE",
+            message=f"cannot parse {path}: {exc}",
+            context={"path": str(path)},
+        ) from exc
+    return sum(1 for node in ast.walk(tree) if isinstance(node, ast.stmt))
+
+
+def measure_file(path: Path) -> int:
+    """The compression-resistant size every draw is anchored to.
+
+    ``max(physical lines, logical statements)``: normally formatted code
+    measures by its lines; ``;``-joined or re-flowed code measures by its
+    statements, so compressing source cannot manufacture budget headroom.
+    """
+    return max(count_lines(path), count_statements(path))
 
 
 def iter_python_files(root: Path) -> Iterator[Path]:
@@ -183,7 +232,7 @@ def _check_packages(budget: Budget, measured: dict[str, int]) -> list[GateViolat
 def check_tree(root: Path, budget: Budget) -> tuple[list[GateViolation], list[str]]:
     """Measure the tree against the baseline; return (violations, notices)."""
     measured = {
-        path.relative_to(root).as_posix(): count_lines(path) for path in iter_python_files(root)
+        path.relative_to(root).as_posix(): measure_file(path) for path in iter_python_files(root)
     }
     violations: list[GateViolation] = []
     notices: list[str] = []
@@ -203,7 +252,7 @@ def check_tree(root: Path, budget: Budget) -> tuple[list[GateViolation], list[st
 def init_tree(root: Path) -> dict[str, Any]:
     """Generate baseline data: files >500 frozen at measured size + package totals."""
     measured = {
-        path.relative_to(root).as_posix(): count_lines(path) for path in iter_python_files(root)
+        path.relative_to(root).as_posix(): measure_file(path) for path in iter_python_files(root)
     }
     files = {rel: lines for rel, lines in measured.items() if lines > NEW_FILE_BUDGET}
     package_dirs = {str(Path(rel).parent.as_posix()) for rel in files}

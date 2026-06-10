@@ -290,3 +290,191 @@ class TestCleanRepo:
         code, out, _ = run_gate(tmp_path, capsys)
         assert code == 0
         assert "cf-exemptions: OK" in out
+
+
+class TestBareNoqa:
+    """Refuter: a codeless ``# noqa`` is a blanket suppression ruff honors —
+    strictly more powerful than the gated ``# noqa: C901`` — and was invisible."""
+
+    def test_bare_codeless_noqa_fails(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_src(tmp_path, "mod.py", "def gnarly():  # noqa\n    return 1\n")
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "BARE_NOQA" in out
+        assert "src/mod.py:1" in out
+
+    def test_bare_noqa_with_trailing_colon_still_bare(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_src(tmp_path, "mod.py", "x = 1  # noqa:\n")
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "BARE_NOQA" in out
+
+    def test_bare_noqa_cannot_be_registered_away(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A blanket suppression names no rule, so no registry entry can cover it.
+        write_src(tmp_path, "mod.py", "def gnarly():  # noqa\n    return 1\n")
+        write_exemptions(tmp_path, [entry("src/mod.py", "gnarly", "C901")], frozen_count=1)
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "BARE_NOQA" in out
+
+    def test_noqa_inside_string_literal_is_ignored(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_src(tmp_path, "mod.py", 's = "# noqa"\n')
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 0
+        assert "BARE_NOQA" not in out
+
+
+class TestSecurityAndEleganceGating:
+    """Refuter: ``# noqa: S602`` / ``# noqa: BLE001`` silenced the security
+    battery and the Elegance Law's blind-except ban with no entry and no reason."""
+
+    def test_unregistered_noqa_s_code_fails(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        body = 'import subprocess\nsubprocess.run("ls", shell=True)  # noqa: S602\n'
+        write_src(tmp_path, "danger.py", body)
+        write_exemptions(tmp_path, [], frozen_count=0)
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "UNREGISTERED_SUPPRESSION" in out
+        assert "S602" in out
+
+    def test_unregistered_noqa_ble_code_fails(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        body = "try:\n    x = 1\nexcept Exception:  # noqa: BLE001\n    pass\n"
+        write_src(tmp_path, "swallow.py", body)
+        write_exemptions(tmp_path, [], frozen_count=0)
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "UNREGISTERED_SUPPRESSION" in out
+        assert "BLE001" in out
+
+    def test_registered_s_code_passes(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        body = 'import subprocess  # noqa: S404\nsubprocess.run(["ls"])\n'
+        write_src(tmp_path, "danger.py", body)
+        write_exemptions(tmp_path, [entry("src/danger.py", 1, "S404")], frozen_count=1)
+        code, _, _ = run_gate(tmp_path, capsys)
+        assert code == 0
+
+    def test_kit_registers_its_own_suppressions(self, capsys: pytest.CaptureFixture[str]) -> None:
+        # The kit obeys the law it enforces: its own S404/S603 noqa comments
+        # trace to reasoned entries in the kit's exemptions.json.
+        kit_root = Path(__file__).resolve().parents[1]
+        assert (kit_root / "exemptions.json").is_file(), "the kit must register itself"
+        code, out, _ = run_gate(kit_root, capsys)
+        assert code == 0, out
+        assert "EXEMPTION RATCHET" in out
+
+
+class TestLayoutDiscovery:
+    """Refuter: only ``<root>/src`` was scanned — a flat/app layout made the
+    whole gate a silent no-op."""
+
+    def test_flat_layout_package_is_scanned(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        app = tmp_path / "app"
+        app.mkdir()
+        (app / "mod.py").write_text("def gnarly():  # noqa: C901\n    return 1\n", encoding="utf-8")
+        code, _, err = run_gate(tmp_path, capsys)
+        assert code == 2  # gated suppression + no exemptions.json = typed gate error
+        assert "GATE_CONFIG_MISSING" in err
+
+    def test_flat_layout_registered_suppression_passes(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        app = tmp_path / "app"
+        app.mkdir()
+        (app / "mod.py").write_text("def gnarly():  # noqa: C901\n    return 1\n", encoding="utf-8")
+        write_exemptions(tmp_path, [entry("app/mod.py", "gnarly", "C901")], frozen_count=1)
+        code, _, _ = run_gate(tmp_path, capsys)
+        assert code == 0
+
+    def test_root_level_module_is_scanned(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "serve.py").write_text("x = 1  # nosec\n", encoding="utf-8")
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "BARE_NOSEC" in out
+
+    def test_tests_dir_is_not_scanned_in_flat_layout(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        body = "def helper():  # noqa: C901\n    return 1\n"
+        (tests / "test_x.py").write_text(body, encoding="utf-8")
+        code, _, _ = run_gate(tmp_path, capsys)
+        assert code == 0
+
+    def test_src_layout_still_wins_over_siblings(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_src(tmp_path, "ok.py", "x = 1\n")
+        app = tmp_path / "app"
+        app.mkdir()
+        (app / "mod.py").write_text("x = 1  # nosec\n", encoding="utf-8")
+        code, _, _ = run_gate(tmp_path, capsys)
+        assert code == 0  # src/ present: src/ is the measured surface
+
+
+class TestSymbolCollision:
+    """Refuter: N same-named suppressions collapsed onto ONE bare-name entry,
+    so frozen_count never bumped — the ratchet undercounted."""
+
+    COLLIDING = (
+        "class A:\n"
+        "    def run(self):  # noqa: C901\n"
+        "        return 1\n"
+        "\n"
+        "class B:\n"
+        "    def run(self):  # noqa: C901\n"
+        "        return 2\n"
+        "\n"
+        "def run():  # noqa: C901\n"
+        "    return 3\n"
+    )
+
+    def test_one_bare_name_entry_cannot_cover_three_suppressions(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_src(tmp_path, "mod.py", self.COLLIDING)
+        write_exemptions(tmp_path, [entry("src/mod.py", "run", "C901")], frozen_count=1)
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "UNREGISTERED_SUPPRESSION" in out  # A.run and B.run are not covered
+
+    def test_qualified_entries_cover_each_method(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        write_src(tmp_path, "mod.py", self.COLLIDING)
+        entries = [
+            entry("src/mod.py", "A.run", "C901"),
+            entry("src/mod.py", "B.run", "C901"),
+            entry("src/mod.py", "run", "C901"),
+        ]
+        write_exemptions(tmp_path, entries, frozen_count=3)
+        code, _, _ = run_gate(tmp_path, capsys)
+        assert code == 0
+
+    def test_entry_matching_multiple_suppressions_is_overloaded(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        body = "def big():  # noqa: PLR0915\n    x = 1  # noqa: PLR0915\n    return x\n"
+        write_src(tmp_path, "mod.py", body)
+        write_exemptions(tmp_path, [entry("src/mod.py", "big", "PLR0915")], frozen_count=1)
+        code, out, _ = run_gate(tmp_path, capsys)
+        assert code == 1
+        assert "EXEMPTION_ENTRY_OVERLOADED" in out

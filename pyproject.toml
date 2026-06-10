@@ -39,7 +39,7 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "C901", "PLR0915", "S", "BLE"]
+select = ["E", "F", "I", "UP", "B", "C901", "PLR0915", "S", "BLE", "PGH004", "RUF100"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
