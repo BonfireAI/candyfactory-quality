@@ -29,8 +29,8 @@ from cf_quality.sticky_check import (
     mount,
 )
 
-# The content hash declared in data/sticky-intro.SOURCE.md — the provenance
-# anchor for the declared mirror of canon ADR 0029.
+# The content hash declared in src/cf_quality/data/sticky-intro.SOURCE.md —
+# the provenance anchor for the declared mirror of canon ADR 0029.
 DECLARED_SHA256 = "11e941b17dbbe3e2a09c2e20bfe2edfc3b7608b6af8bfcfec8f2cb2e136940db"
 
 KIT_ROOT = Path(__file__).resolve().parents[1]
@@ -56,7 +56,9 @@ def _tampered_block() -> str:
 
 
 def test_canonical_text_matches_packaged_data_file() -> None:
-    packaged = (KIT_ROOT / "data" / "sticky-intro.md").read_text(encoding="utf-8")
+    packaged = (KIT_ROOT / "src" / "cf_quality" / "data" / "sticky-intro.md").read_text(
+        encoding="utf-8"
+    )
     assert canonical_text() == packaged
 
 

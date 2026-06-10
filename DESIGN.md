@@ -20,10 +20,10 @@ v0 does not ship, that gap is named here and again in **Open issues**.
 The law has two surfaces by ratified design (ADR 0029: *"prose teaches, gates
 gate"*), and the kit ships both:
 
-1. **The sticky intro (cognitive surface).** `data/sticky-intro.md` is the
+1. **The sticky intro (cognitive surface).** `src/cf_quality/data/sticky-intro.md` is the
    canonical short introduction to the law — a **declared mirror** of canon
    ADR 0029's fenced block, provenance + content hash recorded in
-   `data/sticky-intro.SOURCE.md`. `cf-sticky-check mount` appends it to a
+   `src/cf_quality/data/sticky-intro.SOURCE.md`. `cf-sticky-check mount` appends it to a
    consumer repo's `CLAUDE.md` under a one-line declared-mirror header
    (idempotent; refuses to mount over a tampered block). Any model scanning
    the repo ingests the law as it reads; outside an enforcement perimeter it

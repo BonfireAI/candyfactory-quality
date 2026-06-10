@@ -34,6 +34,12 @@ cf-exemptions = "cf_quality.exemptions:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The canonical sticky block (and its declared-mirror provenance note) ship
+# INSIDE the wheel — cf-sticky-check loads them via importlib.resources, so a
+# non-editable install (CI's exact mode) carries its own gauge data.
+cf_quality = ["data/*.md"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

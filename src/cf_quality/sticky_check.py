@@ -21,10 +21,12 @@ absent; idempotent (a second mount is a no-op); refuses to mount over ANY
 recognizable near-copy of the block — chewed gum (heading included) is never
 silently duplicated or papered over.
 
-The canonical text is loaded from the KIT's own packaged data file, never from
-the consumer repo — the gauge block comes from the factory, so a consumer
-cannot re-declare its own edited copy as canonical (the declare-don't-fix and
-vendored-copy-edit gaming vectors from the Law 5 refuter).
+The canonical text is loaded from the KIT's own packaged data file
+(``cf_quality/data/sticky-intro.md``, via :mod:`importlib.resources` so wheel
+and editable installs resolve identically), never from the consumer repo —
+the gauge block comes from the factory, so a consumer cannot re-declare its
+own edited copy as canonical (the declare-don't-fix and vendored-copy-edit
+gaming vectors from the Law 5 refuter).
 
 HONEST OPEN (salience): the neutralizer check is a keyword heuristic, not an
 understanding of prose — wording it polices can be paraphrased past it. Full
@@ -41,6 +43,7 @@ import json
 import math
 import re
 import sys
+from importlib import resources
 from pathlib import Path
 
 from cf_quality.errors import GateError, GateViolation
@@ -57,25 +60,23 @@ def _normalize(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _candidate_data_files() -> tuple[Path, ...]:
-    """Where the kit's canonical copy may live, in resolution order."""
-    here = Path(__file__).resolve()
-    return (
-        here.parent / "data" / _DATA_FILENAME,  # wheel layout (package data)
-        here.parents[2] / "data" / _DATA_FILENAME,  # source tree / editable install
-    )
-
-
 def canonical_text() -> str:
-    """The canonical sticky block, from the kit's packaged data file."""
-    for candidate in _candidate_data_files():
-        if candidate.is_file():
-            return _normalize(candidate.read_text(encoding="utf-8"))
-    raise GateError(
-        code="STICKY_CANONICAL_MISSING",
-        message="the kit's canonical sticky-intro data file was not found",
-        context={"searched": [str(path) for path in _candidate_data_files()]},
-    )
+    """The canonical sticky block, from the kit's packaged data file.
+
+    ``importlib.resources`` resolves the SAME path under a wheel install and
+    an editable/source-tree install — the mount wave proved a filesystem-
+    relative lookup is a lie under non-editable installs (the wheel had
+    simply not packaged the file; the loader's editable fallback masked it).
+    """
+    resource = resources.files("cf_quality").joinpath("data", _DATA_FILENAME)
+    try:
+        return _normalize(resource.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise GateError(
+            code="STICKY_CANONICAL_MISSING",
+            message="the kit's canonical sticky-intro data file was not found",
+            context={"resource": str(resource)},
+        ) from exc
 
 
 #: A near-copy is recognized when at least this share of the block's

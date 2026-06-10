@@ -66,7 +66,7 @@ _TEMPLATE_HEADER = (
     "| pinned parent SHA | content sha256 | pinned date |"
 )
 _TEMPLATE_EXAMPLE = (
-    "<!-- example row: | sticky-intro | data/sticky-intro.md | candyfactory-canon "
+    "<!-- example row: | sticky-intro | src/cf_quality/data/sticky-intro.md | candyfactory-canon "
     "| decisions/0029-bubblegum-law.md | <full parent commit SHA> "
     "| <sha256 of the local file> | 2026-06-10 | -->"
 )
