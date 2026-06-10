@@ -1,0 +1,11 @@
+{
+  "minTokens": 70,
+  "reporters": ["consoleFull", "json"],
+  "ignore": [
+    "**/.venv/**",
+    "**/node_modules/**",
+    "**/.git/**"
+  ],
+  "gitignore": true,
+  "absolute": true
+}

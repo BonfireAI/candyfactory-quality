@@ -1,0 +1,13 @@
+{
+  "minTokens": 35,
+  "reporters": ["consoleFull", "json"],
+  "ignore": [
+    "**/tests/**",
+    "**/conftest.py",
+    "**/.venv/**",
+    "**/node_modules/**",
+    "**/.git/**"
+  ],
+  "gitignore": true,
+  "absolute": true
+}

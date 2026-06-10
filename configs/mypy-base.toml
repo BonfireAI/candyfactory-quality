@@ -1,0 +1,31 @@
+# candyfactory-quality · mypy-base.toml — the shared mypy gauge.
+# Strict-leaning profile; the ratified budget is 0 NEW type errors
+# (existing debt is frozen by mypy-baseline and may only shrink — see
+# configs/BASELINE-CONVENTIONS.md for the observed sync/filter workflow).
+#
+# Consumer mounts: `mypy --config-file mypy-base.toml src` (mypy reads the
+# [tool.mypy] table from a .toml config file), or copy these keys into the
+# repo's pyproject.toml [tool.mypy] as a declared mirror.
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# --- per-module grace pattern -------------------------------------------------
+# Grace is granted per module, never globally: a legacy or third-party-shaped
+# module gets a NARROW override with a reason comment, and the override list is
+# ratchet-bound (entries only ever leave). Pattern (uncomment + scope in the
+# consumer's vendored copy):
+#
+# [[tool.mypy.overrides]]
+# # per-module grace: <reason — e.g. untyped vendored client, shrink ticket BON-NNNN>
+# module = "legacy_pkg.*"
+# disallow_untyped_defs = false
+#
+# [[tool.mypy.overrides]]
+# # per-module grace: third-party package ships no stubs
+# module = "untyped_dep.*"
+# ignore_missing_imports = true
