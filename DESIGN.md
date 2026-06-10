@@ -562,6 +562,38 @@ Everything below is a known gap, on the record. Ordered by blood.
     gate. Full salience is a reading task — review and the scanning models
     carry it; disclosed in the module docstring.
 
+## 6. Declared source roots (monorepo layouts)
+
+The 9-repo mount wave measured the gap: the gate assumed the package sits at
+the repo root (`src/` discovery), so a monorepo with the package in a subdir
+(`server/`) drew a **vacuous mypy gate** and an **un-importable pytest** —
+green by emptiness, the exact lie the kit exists to refuse.
+
+**The mechanism.** Layout is declared in COMMITTED repo state — a
+`[tool.cf-quality]` table in `pyproject.toml` or in a dedicated
+`.cf-quality.toml` at the repo root (one home only; both at once fails
+`GATE_CONFIG_INVALID`). Two keys: `source_root` (the tree the type gate
+measures; also the no-args default of `cf-recursion-check`) and `package_dir`
+(where the installable package + its pytest config live; the gate installs
+and runs pytest from there). `cf-repo-config source-root|package-dir`
+resolves it for the workflow. The **zero-workflow-inputs doctrine is intact**:
+this is committed, reviewed consumer state riding the same PR as the code it
+describes — never a caller knob, so it cannot neuter the gate from a stub.
+
+**Anti-gaming — the empty-room rule.** A *declared* `source_root` that does
+not exist, escapes the repo, or holds **zero `.py` files** fails typed
+(`GATE_CONFIG_INVALID`) before anything is graded: pointing the gauge at an
+empty room is a violation, not a pass. A declared `package_dir` must carry a
+`pyproject.toml` (an uninstallable package dir is the same empty room), and
+unknown keys fail typed (a typo'd key silently ignored would be drift).
+Absent declaration keeps the historical discovery exactly — `src/` when
+present, else the repo root — and `mypy-baseline.txt` stays root-anchored.
+
+Honest residue: a declared root holding one trivial `.py` while the real
+code lives elsewhere passes the resolver — the floor is non-emptiness, not
+completeness; review and the repo-root-wide gates (ruff, file-budget,
+exemptions, recursion at `.`) still measure the whole tree.
+
 ---
 
 *The kit obeys the law it enforces: every function CC ≤ 10 and ≤ 50

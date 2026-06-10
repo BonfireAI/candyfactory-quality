@@ -282,11 +282,45 @@ def test_gate_mypy_refuses_python_repo_without_baseline() -> None:
     assert "::notice::" in mypy_part, "the Python-free skip stays visible"
 
 
-def test_gate_mypy_targets_discovered_layout() -> None:
-    # Flat-layout consumers must not escape the type gate via a hardcoded `src`.
+def test_gate_mypy_targets_resolved_source_root() -> None:
+    # Flat-layout consumers must not escape the type gate via a hardcoded
+    # `src`, and a monorepo (package in a subdir) must not draw a vacuous
+    # gate: the target is resolved by cf-repo-config (declared layout when
+    # committed, the historical src/root discovery when absent).
     script = _run_script(_load(GATE_PATH), "gate")
     mypy_part = script[script.find("mypy-baseline.txt") :]
-    assert "[ -d src ]" in mypy_part
+    assert 'mypy "$CF_SOURCE_ROOT"' in mypy_part
+
+
+# --- mount-wave fixes: declared layout (zero-inputs doctrine preserved) --------
+
+
+def test_gate_resolves_declared_layout_before_consumer_install() -> None:
+    # Layout comes from COMMITTED consumer state via cf-repo-config — never a
+    # caller knob (the inputs block stays empty). Resolution runs before the
+    # consumer install so an invalid declaration fails typed before anything
+    # is graded against the wrong tree.
+    script = _run_script(_load(GATE_PATH), "gate")
+    resolve_pos = script.find("cf-repo-config source-root")
+    assert resolve_pos >= 0, "the gate must resolve the declared source root"
+    assert "cf-repo-config package-dir" in script
+    install_pos = script.find("pip install -e")
+    assert install_pos > resolve_pos, "layout resolution must precede the consumer install"
+
+
+def test_gate_consumer_install_rides_declared_package_dir() -> None:
+    script = _run_script(_load(GATE_PATH), "gate")
+    install_part = script[script.find("pyproject.toml — consumer") - 200 :]
+    assert 'cd "$CF_PACKAGE_DIR"' in install_part
+
+
+def test_gate_pytest_runs_in_declared_package_dir() -> None:
+    # A monorepo's pytest config + importable package live in the package
+    # dir; running from the umbrella root collected un-importable tests.
+    steps = _steps(_load(GATE_PATH), "gate")
+    pytest_steps = [s for s in steps if "pytest" in s.get("run", "")]
+    assert len(pytest_steps) == 1
+    assert 'cd "$CF_PACKAGE_DIR"' in pytest_steps[0]["run"]
 
 
 def test_gate_ruff_runs_against_the_kit_pinned_gauge() -> None:

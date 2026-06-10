@@ -86,8 +86,27 @@ jobs:
         # block; the consumer never supplies its own copies of the gate tools.
         run: pip install "$GITHUB_WORKSPACE/.cf-quality[dev]"
 
-      - name: Install the consumer package
+      - name: Resolve the consumer's declared layout (cf-repo-config)
+        # The zero-inputs doctrine stays intact: layout comes from COMMITTED
+        # consumer state ([tool.cf-quality] in pyproject.toml or in
+        # .cf-quality.toml), never from a caller knob. A declared source_root
+        # that is missing, escapes the repo, or holds zero .py files FAILS
+        # typed (GATE_CONFIG_INVALID) before anything is graded — pointing
+        # the gauge at an empty room is a violation, not a pass (DESIGN.md
+        # "Declared source roots"). Absent declaration keeps the historical
+        # discovery exactly (src/ when present, else the repo root).
         run: |
+          CF_SOURCE_ROOT="$(cf-repo-config source-root)"
+          CF_PACKAGE_DIR="$(cf-repo-config package-dir)"
+          echo "CF_SOURCE_ROOT=$CF_SOURCE_ROOT" >> "$GITHUB_ENV"
+          echo "CF_PACKAGE_DIR=$CF_PACKAGE_DIR" >> "$GITHUB_ENV"
+          echo "resolved source root: $CF_SOURCE_ROOT / package dir: $CF_PACKAGE_DIR"
+
+      - name: Install the consumer package
+        # Monorepo layouts (declared package_dir) install from the package's
+        # own directory; the default is the repo root, exactly as before.
+        run: |
+          cd "$CF_PACKAGE_DIR"
           if [ ! -f pyproject.toml ]; then
             echo "::notice::no pyproject.toml — consumer package install skipped (gates still run)"
             exit 0
@@ -148,13 +167,14 @@ jobs:
         # no mypy-baseline.txt meant NO type checking and a green gate. Now a
         # repo containing Python REFUSES to pass without a baseline (boot one
         # even at zero errors); only a Python-free repo may skip, visibly.
-        # The measured target is discovered (src/ when present, else the repo
-        # root) so a flat layout cannot escape via the hardcoded `src`.
+        # The measured target is CF_SOURCE_ROOT (cf-repo-config): the declared
+        # source_root for monorepo layouts — the mount wave proved the old
+        # root-level `src` discovery graded a VACUOUS tree there — else the
+        # same src/root discovery as before, so a flat layout still cannot
+        # escape via a hardcoded `src`. mypy-baseline.txt stays root-anchored.
         run: |
           if [ -f mypy-baseline.txt ]; then
-            TARGET=.
-            if [ -d src ]; then TARGET=src; fi
-            mypy "$TARGET" --config-file "$GITHUB_WORKSPACE/.cf-quality/configs/mypy-base.toml" | mypy-baseline filter
+            mypy "$CF_SOURCE_ROOT" --config-file "$GITHUB_WORKSPACE/.cf-quality/configs/mypy-base.toml" | mypy-baseline filter
           elif find . -name '*.py' -not -path '*/.*' | grep -q .; then
             echo "::error::mypy ratchet REFUSED — Python files present but no mypy-baseline.txt; boot the baseline per configs/BASELINE-CONVENTIONS.md (mypy src | mypy-baseline sync), even at zero errors"
             exit 1
@@ -164,5 +184,10 @@ jobs:
 
       - name: pytest
         # Plain pytest: a repo with zero collected tests exits 5 and FAILS the
-        # floor on purpose — a floor without tests is prose, not a gate.
-        run: pytest
+        # floor on purpose — a floor without tests is prose, not a gate. Runs
+        # in the declared package dir (a monorepo's pytest config + importable
+        # package live there; from the umbrella root the suite collected
+        # un-importable tests) — the repo root when nothing is declared.
+        run: |
+          cd "$CF_PACKAGE_DIR"
+          pytest

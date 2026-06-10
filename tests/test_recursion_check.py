@@ -444,3 +444,36 @@ def test_main_returns_two_on_gate_error(tmp_path: Path, capsys: pytest.CaptureFi
     exit_code = main([str(tmp_path / "absent")])
     assert exit_code == 2
     assert "GATE_PATH_MISSING" in capsys.readouterr().err
+
+
+def test_main_default_honors_declared_source_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Mount-wave fix: with no paths argued, the scan root comes from the
+    # committed repo config (cf-repo-config), not a hardcoded `src` — so a
+    # monorepo's declared tree is measured, never an empty default.
+    (tmp_path / ".cf-quality.toml").write_text(
+        '[tool.cf-quality]\nsource_root = "server/src"\n', encoding="utf-8"
+    )
+    nested = tmp_path / "server" / "src"
+    nested.mkdir(parents=True)
+    (nested / "loops.py").write_text("def spiral(n):\n    return spiral(n - 1)\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    exit_code = main([])
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "RECURSION_UNDECLARED" in out
+
+
+def test_main_default_discovers_flat_layout_without_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Absent declaration and no src/: the default measures the repo root —
+    # a flat layout is never a silent GATE_PATH_MISSING on the old `src`.
+    (tmp_path / "loops.py").write_text(
+        "def spiral(n):\n    return spiral(n - 1)\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    exit_code = main([])
+    assert exit_code == 1
+    assert "RECURSION_UNDECLARED" in capsys.readouterr().out

@@ -40,6 +40,10 @@ GLUE_HEADINGS = (
     "SHA-pin doctrine",
     "Baseline-generation runbook",
     "Open issues",
+    # Mount-wave fix: monorepo layouts declare their source root in committed
+    # state; an empty declared room fails typed. The doctrine must be on the
+    # written record, not only in code.
+    "Declared source roots",
 )
 
 

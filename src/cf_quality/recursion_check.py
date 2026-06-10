@@ -52,6 +52,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from cf_quality.errors import GateError, GateViolation
+from cf_quality.repo_config import resolve_source_root
 
 _DECLARATION = re.compile(r"#\s*recursion:\s*bounded by\s+\S")
 _DECLARATION_WINDOW = 3
@@ -230,11 +231,18 @@ def main(argv: list[str] | None = None) -> int:
         description="Recursion is declared with a stated bound, or it fails.",
     )
     parser.add_argument(
-        "paths", nargs="*", default=["src"], help="source trees to scan (default: src)"
+        "paths",
+        nargs="*",
+        default=None,
+        help=(
+            "source trees to scan (default: the repo's declared source_root "
+            "from [tool.cf-quality], else src/ when present, else the cwd)"
+        ),
     )
     args = parser.parse_args(argv)
     try:
-        violations = [v for path in args.paths for v in scan_tree(Path(path))]
+        paths = args.paths or [str(resolve_source_root(Path()))]
+        violations = [v for path in paths for v in scan_tree(Path(path))]
     except GateError as exc:
         print(json.dumps(exc.to_dict()), file=sys.stderr)
         return 2

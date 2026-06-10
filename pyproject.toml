@@ -30,6 +30,7 @@ cf-sticky-check = "cf_quality.sticky_check:main"
 cf-mirror-check = "cf_quality.mirror_check:main"
 cf-recursion-check = "cf_quality.recursion_check:main"
 cf-exemptions = "cf_quality.exemptions:main"
+cf-repo-config = "cf_quality.repo_config:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
