@@ -151,6 +151,7 @@ def test_gate_runs_full_battery_in_order() -> None:
         "cf-mirror-check",
         "cf-recursion-check",
         "cf-exemptions",
+        "cf-import-contract",
         "mypy-baseline filter",
         "pytest",
     ]
