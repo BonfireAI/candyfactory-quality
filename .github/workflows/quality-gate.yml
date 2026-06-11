@@ -159,6 +159,15 @@ jobs:
       - name: cf-exemptions — every suppression traces to a reasoned entry
         run: cf-exemptions
 
+      - name: cf-import-contract — the committed layering contract holds
+        # Same command shape as self-ci. The consumer's ONE committed import
+        # contract ([tool.importlinter] in pyproject.toml) is held in three
+        # passes; a repo with no committed contract fails CONTRACT_MISSING —
+        # the contract must be merged BEFORE the consumer's pin reaches this
+        # commit. Exit 2 is the gate itself failing to run (typed GateError
+        # on stderr — environment trouble is never a violation verdict).
+        run: cf-import-contract --root .
+
       - name: mypy through the baseline ratchet (a Python repo MUST carry a baseline)
         # The pipe is the design: mypy exits nonzero whenever baselined debt
         # exists; mypy-baseline filter is the gate (0 new errors), so the step
