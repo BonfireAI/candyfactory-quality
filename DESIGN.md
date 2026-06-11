@@ -620,6 +620,38 @@ code lives elsewhere passes the resolver — the floor is non-emptiness, not
 completeness; review and the repo-root-wide gates (ruff, file-budget,
 recursion at `.`) still measure the whole tree.
 
+## 7. The client membrane (client repos receive gate-config only)
+
+The canon's client-membrane rule (ADR 0030 §11) and the gate contradicted
+each other: client repos must NOT carry the sticky/chrome, but
+`cf-sticky-check` failed `STICKY_CLAUDE_MD_MISSING` with no waiver knob
+(zero-inputs doctrine), so a client repo's gate could never go fully green —
+the doctrine forbade the very file the gate demanded.
+
+**The mechanism.** The waiver is COMMITTED state, not a knob:
+`[tool.cf-quality] client_repo = true` (same homes and validation as the
+layout keys — a non-boolean value fails `GATE_CONFIG_INVALID`, typed, never
+coerced). Three control rods, each pinned in `tests/test_sticky_check.py`:
+
+- **R1** — declared client + no CLAUDE.md: the check passes and the CLI
+  prints the loud membrane notice ("client membrane declared — sticky intro
+  not mounted per ADR 0030 §11") — waived visibly, never silently.
+- **R2** — no declaration: behavior unchanged for the fleet, byte for byte;
+  `client_repo = false` behaves exactly as undeclared.
+- **R3** — declared client carrying ANY sticky chrome (the canonical block,
+  a chewed or older-vintage copy, or the kit's mount-marker header) fails
+  `STICKY_CLIENT_MEMBRANE_BREACHED` — the membrane is two-way. `mount`
+  refuses a declared client repo outright (`STICKY_MOUNT_CLIENT_MEMBRANE`).
+
+**Honest residue.** The gate cannot verify WHO is a client: a non-client
+repo could commit the declaration and dodge the sticky mount. The defense is
+the same one every doctrine surface carries — the declaration is a reviewed
+diff (Wizard-gated adoption), and the notice prints on EVERY gate run, so a
+wrongly-declared repo is loud in its own CI logs. A Constable-cadence sweep
+of `client_repo` declarations against the known client list is the candidate
+mechanical closure. Prose mentioning the law is NOT chrome (the breach keys
+on the heading line, the mount marker, and block near-match — not keywords).
+
 ---
 
 *The kit obeys the law it enforces: every function CC ≤ 10 and ≤ 50

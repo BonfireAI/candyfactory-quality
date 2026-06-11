@@ -9,6 +9,8 @@ repo root (one home only; both at once is ambiguous and fails)::
     [tool.cf-quality]
     source_root = "server/src"   # the tree mypy gates (and gate defaults)
     package_dir = "server"       # where the installable package lives
+    client_repo = true           # the client membrane: gate-config only,
+                                 # never sticky/chrome (ADR 0030 §11)
 
 Anti-gaming (the empty-room rule): a DECLARED ``source_root`` must exist,
 stay inside the repo, and hold at least one ``.py`` file — pointing the gauge
@@ -33,7 +35,7 @@ from pathlib import Path
 from cf_quality.errors import GateError
 
 CONFIG_FILENAME = ".cf-quality.toml"
-_ALLOWED_KEYS = frozenset({"source_root", "package_dir"})
+_ALLOWED_KEYS = frozenset({"source_root", "package_dir", "client_repo"})
 
 #: Directory names that are never first-party import surface when the source
 #: root is the repo root itself (tests carry their own per-file-ignores
@@ -57,10 +59,17 @@ NON_SHIPPING_DIRS = frozenset(
 
 @dataclass(frozen=True)
 class RepoConfig:
-    """The committed ``[tool.cf-quality]`` declaration; both fields optional."""
+    """The committed ``[tool.cf-quality]`` declaration; all fields optional.
+
+    ``client_repo`` is the client-membrane declaration: a client repo
+    receives gate-config only — never sticky/chrome. Declaring it is a
+    Wizard-gated, reviewed act (committed state riding a PR), and the gates
+    honor it LOUDLY, never silently.
+    """
 
     source_root: str | None = None
     package_dir: str | None = None
+    client_repo: bool = False
 
 
 def _config_error(message: str, context: dict[str, object]) -> GateError:
@@ -100,6 +109,20 @@ def _string_field(table: dict[str, object], key: str, home: str) -> str | None:
     return value
 
 
+def _bool_field(table: dict[str, object], key: str, home: str) -> bool:
+    """A strict TOML boolean; absent means False. A tampered declaration
+    ("yes", 1, "true") is no declaration — it fails typed, never coerces."""
+    value = table.get(key)
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise _config_error(
+            f"[tool.cf-quality] {key} in {home} must be a TOML boolean (true/false)",
+            {"home": home, "key": key, "value": repr(value)},
+        )
+    return value
+
+
 def load(root: Path) -> RepoConfig:
     """The committed declaration of one repo; all-absent means 'use discovery'."""
     homes = {
@@ -126,6 +149,7 @@ def load(root: Path) -> RepoConfig:
     return RepoConfig(
         source_root=_string_field(table, "source_root", home),
         package_dir=_string_field(table, "package_dir", home),
+        client_repo=_bool_field(table, "client_repo", home),
     )
 
 
