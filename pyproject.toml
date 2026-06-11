@@ -22,6 +22,9 @@ dev = [
     "pyyaml",
     # types-PyYAML: mypy stubs so the test battery type-checks at zero errors.
     "types-PyYAML",
+    # import-linter: pinned EXACTLY — cf-import-contract's pass 2 parses its
+    # observed output; a floating dep would let the oracle drift under the contract.
+    "import-linter==2.11",
 ]
 
 [project.scripts]
@@ -31,6 +34,7 @@ cf-mirror-check = "cf_quality.mirror_check:main"
 cf-recursion-check = "cf_quality.recursion_check:main"
 cf-exemptions = "cf_quality.exemptions:main"
 cf-repo-config = "cf_quality.repo_config:main"
+cf-import-contract = "cf_quality.import_contract:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

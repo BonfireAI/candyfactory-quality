@@ -1,5 +1,5 @@
 {
-  "frozen_count": 1,
+  "frozen_count": 2,
   "entries": [
     {
       "file": "src/cf_quality/exemptions.py",
@@ -7,6 +7,13 @@
       "rule": "S603",
       "reason": "subprocess.run executes only the repo-local fold-in script through sys.executable, fixed argv, no shell, no untrusted input",
       "approver": "Anta (quality-stratum refuter-fix pass, 2026-06-10)"
+    },
+    {
+      "file": "src/cf_quality/import_contract.py",
+      "symbol_or_line": "_run_lint_imports",
+      "rule": "S603",
+      "reason": "subprocess.run executes only the kit-pinned lint-imports console script found beside sys.executable, fixed argv, no shell, no untrusted input",
+      "approver": "pending maintainer ratification (import-contract gate build, 2026-06-11)"
     }
   ]
 }
