@@ -30,8 +30,9 @@ from cf_quality.sticky_check import (
 )
 
 # The content hash declared in src/cf_quality/data/sticky-intro.SOURCE.md —
-# the provenance anchor for the declared mirror of canon ADR 0029.
-DECLARED_SHA256 = "11e941b17dbbe3e2a09c2e20bfe2edfc3b7608b6af8bfcfec8f2cb2e136940db"
+# the provenance anchor for the declared mirror of canon ADR 0030 §9 (the v2
+# block, which supersedes ADR 0029's v1 block per the ADR's own text).
+DECLARED_SHA256 = "7dc04712c33f98318563bb2a1b9e60c753b83e257ed5aa403c406911d7d45e07"
 
 KIT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,7 +48,7 @@ def _repo_with(tmp_path: Path, claude_md: str | None) -> Path:
 
 def _tampered_block() -> str:
     """Chewed gum: one budget number edited inside the canonical block."""
-    chewed = canonical_text().replace("≤ 500\n", "≤ 5000\n")
+    chewed = canonical_text().replace("≤ 500 lines", "≤ 5000 lines")
     assert chewed != canonical_text(), "tamper fixture must actually differ"
     return chewed
 
@@ -120,7 +121,8 @@ def test_check_fails_on_tampered_block_with_diff(tmp_path: Path) -> None:
 
 def test_check_whitespace_edit_inside_block_is_tampering(tmp_path: Path) -> None:
     # Byte-identical means byte-identical: a doubled space is chewed gum.
-    chewed = canonical_text().replace("Budgets, not vibes:", "Budgets,  not vibes:")
+    chewed = canonical_text().replace("Budgets come from", "Budgets  come from")
+    assert chewed != canonical_text(), "whitespace tamper fixture must actually differ"
     repo = _repo_with(tmp_path, chewed)
     violations = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_TAMPERED"]
@@ -232,7 +234,8 @@ def test_mount_appends_block_with_declared_mirror_header(tmp_path: Path) -> None
 
 def test_mount_header_is_the_ratified_one_liner() -> None:
     assert MIRROR_HEADER == (
-        "<!-- declared mirror of candyfactory-canon ADR 0029 · mounted by candyfactory-quality -->"
+        "<!-- declared mirror of candyfactory-canon ADR 0029 + ADR 0030"
+        " · mounted by candyfactory-quality -->"
     )
     assert "\n" not in MIRROR_HEADER
 

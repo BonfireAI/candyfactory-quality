@@ -49,7 +49,8 @@ from pathlib import Path
 from cf_quality.errors import GateError, GateViolation
 
 MIRROR_HEADER = (
-    "<!-- declared mirror of candyfactory-canon ADR 0029 · mounted by candyfactory-quality -->"
+    "<!-- declared mirror of candyfactory-canon ADR 0029 + ADR 0030"
+    " · mounted by candyfactory-quality -->"
 )
 
 _DATA_FILENAME = "sticky-intro.md"
