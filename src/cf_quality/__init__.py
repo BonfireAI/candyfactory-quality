@@ -2,7 +2,8 @@
 
 The executable half of the BubbleGum Law (form is gated, and the law travels
 sticky). Ships two surfaces: the canonical sticky-intro mount (a declared
-mirror of canon ADR 0029) and the gate battery the factory's CI runs —
+mirror of canon ADR 0030 §9, lineage from ADR 0029) and the gate battery
+the factory's CI runs —
 file budgets, sticky-intro presence, mirror declarations, recursion
 declarations, and the exemptions ledger.
 

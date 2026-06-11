@@ -11,8 +11,9 @@ whatever package the first agent downloaded.
    short introduction to the law that the kit mounts into every consumer repo. Any
    model that scans a repo ingests the law as it reads. Outside an enforcement
    perimeter it acts as the strongest suggestion in the file; that is its job.
-   The copy here is a **declared mirror** of canon ADR 0029
-   (see `src/cf_quality/data/sticky-intro.SOURCE.md` for provenance and content hash).
+   The copy here is a **declared mirror** of canon ADR 0030 §9 (the v2 block,
+   which supersedes ADR 0029's v1 block per the ADR's own text; see
+   `src/cf_quality/data/sticky-intro.SOURCE.md` for provenance and content hash).
 2. **The gate** (mechanical surface) — inside CandyFactory CI and inside Bonfire
    burns, the law is executable and refusing. Prose teaches; it never substitutes
    for the gate.

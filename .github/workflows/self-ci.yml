@@ -52,7 +52,7 @@ jobs:
           if [ -f MIRRORS.md ]; then
             cf-mirror-check check --repo .
           else
-            echo "::notice::cf-mirror-check SKIPPED — no MIRRORS.md yet; the sticky-intro mirror of canon ADR 0029 must be declared before v0.1"
+            echo "::notice::cf-mirror-check SKIPPED — no MIRRORS.md yet; the sticky-intro mirror of canon ADR 0029 + ADR 0030 must be declared before v0.1"
           fi
 
       - name: cf-recursion-check — recursion declared in the kit's own source
