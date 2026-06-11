@@ -22,6 +22,9 @@ dev = [
     "pyyaml",
     # types-PyYAML: mypy stubs so the test battery type-checks at zero errors.
     "types-PyYAML",
+    # import-linter: pinned EXACTLY — cf-import-contract's pass 2 parses its
+    # observed output; a floating dep would let the oracle drift under the contract.
+    "import-linter==2.11",
 ]
 
 [project.scripts]
@@ -31,6 +34,7 @@ cf-mirror-check = "cf_quality.mirror_check:main"
 cf-recursion-check = "cf_quality.recursion_check:main"
 cf-exemptions = "cf_quality.exemptions:main"
 cf-repo-config = "cf_quality.repo_config:main"
+cf-import-contract = "cf_quality.import_contract:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -40,6 +44,27 @@ where = ["src"]
 # INSIDE the wheel — cf-sticky-check loads them via importlib.resources, so a
 # non-editable install (CI's exact mode) carries its own gauge data.
 cf_quality = ["data/*.md"]
+
+[tool.importlinter]
+# The kit's OWN import contract — the gauge submits to the gate it ships
+# (cf-import-contract; pinned settings per templates/import-contract.toml).
+root_packages = ["cf_quality"]
+include_external_packages = false
+exclude_type_checking_imports = false
+
+[[tool.importlinter.contracts]]
+# The kit's measured layering: the six gate modules sit above repo_config
+# (declared-layout resolution) above errors (the typed failure vocabulary).
+# Sibling gates are independent — no gate imports another gate.
+name = "the gates sit above repo_config above errors"
+type = "layers"
+containers = ["cf_quality"]
+layers = [
+    "exemptions | file_budget | import_contract | mirror_check | recursion_check | sticky_check",
+    "repo_config",
+    "errors",
+]
+unmatched_ignore_imports_alerting = "error"
 
 [tool.ruff]
 line-length = 100

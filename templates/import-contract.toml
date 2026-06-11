@@ -1,0 +1,28 @@
+# Blessed import-contract template — cf-import-contract (the layering gate).
+#
+# Copy the [tool.importlinter] table below into the consumer repo's
+# pyproject.toml and adapt root_packages + the contract clauses to the repo's
+# real layers. The PINNED settings are load-bearing and may not be loosened —
+# pass 1 of the gate fails the contract file itself if they drift:
+#
+#   include_external_packages = false      # the contract gates THIS repo's layers
+#   exclude_type_checking_imports = false  # TYPE_CHECKING edges stay under contract
+#   unmatched_ignore_imports_alerting = "error"  # stale ignores fail; the
+#                                                # committed baseline self-cleans
+#
+# ignore_imports entries are ENUMERATED edges only (no wildcards) and ratchet
+# shrink-only against the committed import-contract-baseline.json
+# ({"ignored_imports": N}; absent means zero). Every top-level package under
+# the source root must be named in some contract clause (exhaustiveness).
+
+[tool.importlinter]
+root_packages = ["core", "tenants"]
+include_external_packages = false
+exclude_type_checking_imports = false
+
+[[tool.importlinter.contracts]]
+name = "core does not import tenants"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["tenants"]
+unmatched_ignore_imports_alerting = "error"
