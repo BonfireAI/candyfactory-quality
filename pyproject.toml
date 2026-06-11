@@ -55,11 +55,16 @@ max-complexity = 10
 max-statements = 50
 
 [tool.ruff.lint.per-file-ignores]
-# S101: pytest's assert is the test idiom, not a security hole.
-# Doubled glob mirrors configs/ruff-base.toml: '**/tests/*' covers nested
-# layouts (the mount wave's monorepo false-positive), root form kept.
-"tests/*" = ["S101"]
-"**/tests/*" = ["S101"]
+# tests-context battery, measured estate-wide 2026-06-10; src keeps the full battery:
+# S101 pytest assert · S105/S106 fake credentials · S603/S607 subprocess runs
+# of the repo's own CLI · S608 fixture SQL · B017 broad pytest.raises.
+# Glob set + battery mirror configs/ruff-base.toml (declared mirror — the kit
+# submits to the gauge it ships).
+"tests/*" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/tests/*" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/conftest.py" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
 
 [tool.mypy]
 python_version = "3.12"

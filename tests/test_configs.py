@@ -14,6 +14,22 @@ from typing import Any
 
 CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
 
+# The tests-context battery — rules test code legitimately trips, measured
+# estate-wide 2026-06-10: S101 pytest's assert · S105/S106 fake credentials ·
+# S603/S607 subprocess runs of the repo's own CLI · S608 fixture SQL strings ·
+# B017 broad pytest.raises. Src keeps the full battery.
+TESTS_CONTEXT_BATTERY = {"S101", "S105", "S106", "S603", "S607", "S608", "B017"}
+
+# The glob set must actually cover test trees: root and nested, files at any
+# depth under tests/, and conftest.py wherever it lives.
+TESTS_CONTEXT_GLOBS = ("tests/*", "tests/**", "**/tests/*", "**/tests/**", "**/conftest.py")
+
+# The comment anchoring the carve-out to its measurement, verbatim in both
+# the shipped gauge and the kit's own mirror of it.
+TESTS_CONTEXT_ANCHOR = (
+    "tests-context battery, measured estate-wide 2026-06-10; src keeps the full battery"
+)
+
 
 def _load_toml(name: str) -> dict[str, Any]:
     return tomllib.loads((CONFIGS_DIR / name).read_text(encoding="utf-8"))
@@ -56,12 +72,44 @@ def test_ruff_base_test_ignores_cover_nested_layouts() -> None:
     assert "S101" in ignores["tests/*"], "the root-level form stays alongside the doubled glob"
 
 
+def test_ruff_base_tests_carve_out_pins_the_measured_battery() -> None:
+    # Estate-wide CI measurement (2026-06-10): the gauge's ruff step failed
+    # largely on security hits in TEST code — fake creds, subprocess on the
+    # repo's own CLI, fixture SQL, broad pytest.raises. The refuter doctrine:
+    # FP noise trains agents to ignore the gate, so the tests context carves
+    # out the measured battery EXACTLY — no more, no less.
+    ignores = _load_toml("ruff-base.toml")["lint"]["per-file-ignores"]
+    for glob in TESTS_CONTEXT_GLOBS:
+        assert glob in ignores, f"tests-context glob missing from ruff-base.toml: {glob}"
+        assert set(ignores[glob]) == TESTS_CONTEXT_BATTERY, f"battery drift at {glob}"
+    assert set(ignores) == set(TESTS_CONTEXT_GLOBS), "no carve-out globs beyond the tests context"
+
+
 def test_kit_own_ruff_config_test_ignores_cover_nested_layouts() -> None:
     # The kit mirrors the gauge it ships (it submits before it preaches).
     pyproject = _load_toml("../pyproject.toml")
     ignores = pyproject["tool"]["ruff"]["lint"]["per-file-ignores"]
     assert "S101" in ignores["**/tests/*"]
     assert "S101" in ignores["tests/*"]
+
+
+def test_kit_own_ruff_config_mirrors_the_tests_carve_out_battery() -> None:
+    # Same pin against the kit's own pyproject mirror — gauge and mirror may
+    # never drift on the carve-out (declared-mirror discipline).
+    pyproject = _load_toml("../pyproject.toml")
+    ignores = pyproject["tool"]["ruff"]["lint"]["per-file-ignores"]
+    for glob in TESTS_CONTEXT_GLOBS:
+        assert glob in ignores, f"tests-context glob missing from pyproject mirror: {glob}"
+        assert set(ignores[glob]) == TESTS_CONTEXT_BATTERY, f"battery drift at {glob}"
+
+
+def test_tests_carve_out_comment_anchors_the_measurement() -> None:
+    # The carve-out carries its measurement anchor verbatim in both surfaces —
+    # a budget without its measurement is a vibe (BubbleGum doctrine).
+    base = (CONFIGS_DIR / "ruff-base.toml").read_text(encoding="utf-8")
+    mirror = (CONFIGS_DIR.parent / "pyproject.toml").read_text(encoding="utf-8")
+    assert TESTS_CONTEXT_ANCHOR in base
+    assert TESTS_CONTEXT_ANCHOR in mirror
 
 
 def test_ruff_base_header_declares_vendoring_and_sync_allowlist() -> None:

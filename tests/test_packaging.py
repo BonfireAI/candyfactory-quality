@@ -25,12 +25,11 @@ KIT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _run(argv: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    # S603 suppression reason: fixed argv built from sys.executable /
-    # venv-internal absolute paths only — no shell, no untrusted input (same
-    # shape as the registered exemption for exemptions._run_fold_ins).
-    return subprocess.run(  # noqa: S603
-        argv, cwd=cwd, capture_output=True, text=True, check=False
-    )
+    # Fixed argv built from sys.executable / venv-internal absolute paths only —
+    # no shell, no untrusted input. S603 is carved out for the tests context
+    # (measured estate-wide 2026-06-10), so the suppression this call once
+    # carried became an unused directive (RUF100) and was removed.
+    return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
 
 
 @pytest.fixture(scope="module")

@@ -31,12 +31,21 @@ max-complexity = 10
 max-statements = 50
 
 [lint.per-file-ignores]
-# S101: pytest's assert is the test idiom, not a security hole.
+# tests-context battery, measured estate-wide 2026-06-10; src keeps the full battery:
+#   S101 pytest's assert is the test idiom, not a security hole ·
+#   S105/S106 fake credentials in fixtures · S603/S607 subprocess runs of the
+#   repo's own CLI · S608 fixture SQL strings · B017 broad pytest.raises.
+# Test code legitimately does these things; FP noise trains agents to ignore
+# the gate (refuter doctrine), so the tests context carves them out EXACTLY.
 # This table is the ONLY section a consumer may locally extend (and the only
 # dotted path allowed in [tool.ruff-sync].exclude) — every added ignore must
 # trace to a reasoned entry in the repo's exemptions.json (cf-exemptions).
-# Both glob forms, by measurement: 'tests/*' alone missed nested layouts (a
-# monorepo's server/tests drew 845 false S101 in the mount wave); '**/tests/*'
-# covers any depth and the root form stays alongside it, harmless.
-"tests/*" = ["S101"]
-"**/tests/*" = ["S101"]
+# Glob set covers test trees for real, by measurement: 'tests/*' alone missed
+# nested layouts (a monorepo's server/tests drew 845 false S101 in the mount
+# wave); the '**' forms cover any depth on both sides; '**/conftest.py'
+# catches fixture roots wherever they live.
+"tests/*" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/tests/*" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/conftest.py" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
