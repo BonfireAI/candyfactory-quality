@@ -49,7 +49,7 @@ def test_ruff_base_selects_the_gate_rule_battery() -> None:
 
 def test_ruff_base_test_ignores_cover_nested_layouts() -> None:
     # Mount-wave regression: 'tests/*' matches only repo-root tests — a
-    # monorepo (mexxa server/tests) drew 845 false S101. The doubled glob
+    # server/-rooted monorepo consumer (server/tests) drew 845 false S101. The doubled glob
     # '**/tests/*' covers nested layouts; the root form stays, harmless.
     ignores = _load_toml("ruff-base.toml")["lint"]["per-file-ignores"]
     assert "S101" in ignores["**/tests/*"], "nested tests/ dirs must carry the S101 carve-out"

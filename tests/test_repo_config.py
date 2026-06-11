@@ -40,7 +40,7 @@ def _declare(repo: Path, body: str, home: str = ".cf-quality.toml") -> None:
 
 
 def _monorepo(tmp_path: Path) -> Path:
-    """A mexxa-shaped consumer: the package lives under server/, not the root."""
+    """A server/-rooted monorepo consumer: the package lives under server/, not the root."""
     repo = _repo(tmp_path)
     (repo / "server" / "src" / "pkg").mkdir(parents=True)
     (repo / "server" / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")

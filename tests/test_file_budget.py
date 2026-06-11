@@ -180,42 +180,42 @@ class TestPackageBudget:
     def test_handle_extra_at_499_next_to_frozen_handle_fails(
         self, tmp_path: Path, capsys: Any
     ) -> None:
-        # Fixture package: chunk's anchor case. handle.py frozen at 700,
+        # Fixture package: the big-legacy-module anchor case. handle.py frozen at 700,
         # package frozen at 700 total. The burn agent dodges the per-file
         # gate by creating handle_extra.py at 499 lines — the package
         # budget catches the relocation of the accretion engine.
-        write_py(tmp_path / "src" / "chunk" / "handle.py", 700)
-        write_py(tmp_path / "src" / "chunk" / "handle_extra.py", 499)
+        write_py(tmp_path / "src" / "engine" / "handle.py", 700)
+        write_py(tmp_path / "src" / "engine" / "handle_extra.py", 499)
         write_budget(
             tmp_path,
-            {"files": {"src/chunk/handle.py": 700}, "packages": {"src/chunk": 700}},
+            {"files": {"src/engine/handle.py": 700}, "packages": {"src/engine": 700}},
         )
         assert main(["check", "--root", str(tmp_path)]) == 1
         report = report_from(capsys.readouterr().out)
         assert "PACKAGE_BUDGET_EXCEEDED" in violation_codes(report)
         pkg = next(v for v in report["violations"] if v["code"] == "PACKAGE_BUDGET_EXCEEDED")
-        assert pkg["path"] == "src/chunk"
+        assert pkg["path"] == "src/engine"
         assert pkg["context"]["lines"] == 1199
         assert pkg["context"]["frozen"] == 700
-        assert pkg["context"]["new_files"] == ["src/chunk/handle_extra.py"]
+        assert pkg["context"]["new_files"] == ["src/engine/handle_extra.py"]
 
     def test_new_file_fits_inside_room_freed_by_shrink(self, tmp_path: Path) -> None:
         # handle.py shrank 700 -> 600; a 50-line sibling fits in the freed room.
-        write_py(tmp_path / "src" / "chunk" / "handle.py", 600)
-        write_py(tmp_path / "src" / "chunk" / "helpers.py", 50)
+        write_py(tmp_path / "src" / "engine" / "handle.py", 600)
+        write_py(tmp_path / "src" / "engine" / "helpers.py", 50)
         write_budget(
             tmp_path,
-            {"files": {"src/chunk/handle.py": 700}, "packages": {"src/chunk": 700}},
+            {"files": {"src/engine/handle.py": 700}, "packages": {"src/engine": 700}},
         )
         assert main(["check", "--root", str(tmp_path)]) == 0
 
     def test_package_budget_counts_subdirectories(self, tmp_path: Path, capsys: Any) -> None:
         # Hiding the sibling one directory deeper does not dodge the draw.
-        write_py(tmp_path / "src" / "chunk" / "handle.py", 700)
-        write_py(tmp_path / "src" / "chunk" / "extra" / "handle_extra.py", 499)
+        write_py(tmp_path / "src" / "engine" / "handle.py", 700)
+        write_py(tmp_path / "src" / "engine" / "extra" / "handle_extra.py", 499)
         write_budget(
             tmp_path,
-            {"files": {"src/chunk/handle.py": 700}, "packages": {"src/chunk": 700}},
+            {"files": {"src/engine/handle.py": 700}, "packages": {"src/engine": 700}},
         )
         assert main(["check", "--root", str(tmp_path)]) == 1
         report = report_from(capsys.readouterr().out)
@@ -224,25 +224,25 @@ class TestPackageBudget:
 
 class TestDeclaredFiles:
     def test_declared_file_does_not_draw_against_package_budget(self, tmp_path: Path) -> None:
-        write_py(tmp_path / "src" / "chunk" / "handle.py", 700)
-        write_py(tmp_path / "src" / "chunk" / "webhook.py", 200)
+        write_py(tmp_path / "src" / "engine" / "handle.py", 700)
+        write_py(tmp_path / "src" / "engine" / "webhook.py", 200)
         write_budget(
             tmp_path,
             {
                 "files": {
-                    "src/chunk/handle.py": 700,
-                    "src/chunk/webhook.py": {"purpose": "webhook adapter, design-reviewed"},
+                    "src/engine/handle.py": 700,
+                    "src/engine/webhook.py": {"purpose": "webhook adapter, design-reviewed"},
                 },
-                "packages": {"src/chunk": 700},
+                "packages": {"src/engine": 700},
             },
         )
         assert main(["check", "--root", str(tmp_path)]) == 0
 
     def test_declared_file_still_obeys_new_file_cap(self, tmp_path: Path, capsys: Any) -> None:
-        write_py(tmp_path / "src" / "chunk" / "webhook.py", 501)
+        write_py(tmp_path / "src" / "engine" / "webhook.py", 501)
         write_budget(
             tmp_path,
-            {"files": {"src/chunk/webhook.py": {"purpose": "declared but oversized"}}},
+            {"files": {"src/engine/webhook.py": {"purpose": "declared but oversized"}}},
         )
         assert main(["check", "--root", str(tmp_path)]) == 1
         report = report_from(capsys.readouterr().out)
@@ -251,25 +251,25 @@ class TestDeclaredFiles:
 
 class TestInitMode:
     def test_init_freezes_only_files_over_budget_at_measured_size(self, tmp_path: Path) -> None:
-        write_py(tmp_path / "src" / "chunk" / "handle.py", 694)
-        write_py(tmp_path / "src" / "chunk" / "small.py", 100)
+        write_py(tmp_path / "src" / "engine" / "handle.py", 694)
+        write_py(tmp_path / "src" / "engine" / "small.py", 100)
         assert main(["init", "--root", str(tmp_path)]) == 0
         data = json.loads((tmp_path / "file-budget.json").read_text(encoding="utf-8"))
-        assert data["files"] == {"src/chunk/handle.py": 694}
+        assert data["files"] == {"src/engine/handle.py": 694}
 
     def test_init_records_package_totals_for_dirs_holding_frozen_files(
         self, tmp_path: Path
     ) -> None:
-        write_py(tmp_path / "src" / "chunk" / "handle.py", 694)
-        write_py(tmp_path / "src" / "chunk" / "small.py", 100)
+        write_py(tmp_path / "src" / "engine" / "handle.py", 694)
+        write_py(tmp_path / "src" / "engine" / "small.py", 100)
         write_py(tmp_path / "src" / "other" / "tiny.py", 10)
         assert main(["init", "--root", str(tmp_path)]) == 0
         data = json.loads((tmp_path / "file-budget.json").read_text(encoding="utf-8"))
-        assert data["packages"] == {"src/chunk": 794}
+        assert data["packages"] == {"src/engine": 794}
 
     def test_init_then_check_is_green_by_construction(self, tmp_path: Path) -> None:
-        write_py(tmp_path / "src" / "chunk" / "handle.py", 694)
-        write_py(tmp_path / "src" / "chunk" / "small.py", 100)
+        write_py(tmp_path / "src" / "engine" / "handle.py", 694)
+        write_py(tmp_path / "src" / "engine" / "small.py", 100)
         assert main(["init", "--root", str(tmp_path)]) == 0
         assert main(["check", "--root", str(tmp_path)]) == 0
 
@@ -308,10 +308,10 @@ class TestCompressionResistance:
     def test_statement_joining_cannot_fake_a_shrink(self, tmp_path: Path, capsys: Any) -> None:
         # 900 real statements joined 3-per-line = 300 physical lines, against a
         # 700 freeze: the truth is GROWTH, never a shrink notice.
-        write_joined_py(tmp_path / "src" / "chunk" / "handle.py", 900, 3)
+        write_joined_py(tmp_path / "src" / "engine" / "handle.py", 900, 3)
         write_budget(
             tmp_path,
-            {"files": {"src/chunk/handle.py": 700}, "packages": {"src/chunk": 700}},
+            {"files": {"src/engine/handle.py": 700}, "packages": {"src/engine": 700}},
         )
         assert main(["check", "--root", str(tmp_path)]) == 1
         out = capsys.readouterr().out
@@ -321,11 +321,11 @@ class TestCompressionResistance:
     def test_joined_shrink_cannot_free_package_headroom(self, tmp_path: Path, capsys: Any) -> None:
         # The full refuter repro: joined handle.py + a brand-new 380-line
         # sibling = 1280 real statements in a package frozen at 700.
-        write_joined_py(tmp_path / "src" / "chunk" / "handle.py", 900, 3)
-        write_py(tmp_path / "src" / "chunk" / "new_engine.py", 380)
+        write_joined_py(tmp_path / "src" / "engine" / "handle.py", 900, 3)
+        write_py(tmp_path / "src" / "engine" / "new_engine.py", 380)
         write_budget(
             tmp_path,
-            {"files": {"src/chunk/handle.py": 700}, "packages": {"src/chunk": 700}},
+            {"files": {"src/engine/handle.py": 700}, "packages": {"src/engine": 700}},
         )
         assert main(["check", "--root", str(tmp_path)]) == 1
         codes = violation_codes(report_from(capsys.readouterr().out))
@@ -374,7 +374,7 @@ class TestGreenfieldPackageBoundary:
         self, tmp_path: Path
     ) -> None:
         for name in ("a", "b", "c", "d", "e"):
-            write_py(tmp_path / "src" / "chunk" / f"engine_{name}.py", 499)
+            write_py(tmp_path / "src" / "engine" / f"engine_{name}.py", 499)
         data = init_tree(tmp_path)
         assert data == {"files": {}, "packages": {}}  # nothing seeded the draw
         violations, _ = check_tree(tmp_path, Budget(files={}, packages={}))
