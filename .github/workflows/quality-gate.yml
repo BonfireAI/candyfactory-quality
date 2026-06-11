@@ -53,12 +53,12 @@ jobs:
       - name: Checkout consumer repo
         # In a reusable workflow the github context belongs to the CALLER, so a
         # bare checkout lands the consumer repo at the triggering ref.
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3 (node24)
         with:
           path: repo
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0 (node24)
         with:
           python-version: "3.12"
 
@@ -74,12 +74,49 @@ jobs:
         # grant is ever removed this step fails loudly with a 404 — the fix is
         # to restore the grant or pass a fine-grained PAT via the caller's
         # `secrets: inherit`.
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3 (node24)
         with:
           repository: BonfireAI/candyfactory-quality
           ref: ${{ github.job_workflow_sha }}
           path: .cf-quality
           token: ${{ github.token }}
+
+      - name: Honor the consumer's declared kit pin (fail-safe — never floats)
+        # `github.job_workflow_sha` above is DOCUMENTED as the reusable
+        # workflow's commit but was OBSERVED empty at run time (notioncrm run
+        # 27370755155: the checkout received no `ref:` and fell back to
+        # `git checkout -B main refs/remotes/origin/main`), so SHA-pinned
+        # consumers were gauged by whatever kit MAIN carried — counts
+        # irreproducible, twice in one night. The pin of record is the one
+        # the consumer COMMITS in its caller stub; this step re-anchors the
+        # kit checkout to that SHA before anything is installed, and REFUSES
+        # to run when no pin can be determined — the default fails safe
+        # instead of silently floating to main.
+        working-directory: ${{ github.workspace }}/.cf-quality
+        env:
+          JOB_WORKFLOW_SHA: ${{ github.job_workflow_sha }}
+        run: |
+          HEAD_SHA="$(git rev-parse HEAD)"
+          mapfile -t PINS < <(grep -rhoE 'BonfireAI/candyfactory-quality/\.github/workflows/quality-gate\.yml@[0-9a-f]{40}' "$GITHUB_WORKSPACE/repo/.github/workflows" 2>/dev/null | sed 's/.*@//' | sort -u)
+          if [ "${#PINS[@]}" -eq 1 ]; then
+            PIN="${PINS[0]}"
+            if [ "$HEAD_SHA" = "$PIN" ]; then
+              echo "kit checkout already rides the declared pin $PIN"
+            else
+              echo "::warning::kit checkout was at $HEAD_SHA (github.job_workflow_sha='$JOB_WORKFLOW_SHA') — re-anchoring to the consumer's declared pin"
+              git fetch --depth 1 origin "$PIN"
+              git checkout --detach "$PIN"
+              echo "kit re-anchored to the declared pin $PIN"
+            fi
+          elif [ "${#PINS[@]}" -gt 1 ]; then
+            echo "::error::quality-gate refused: ${#PINS[@]} distinct kit pins committed in the consumer's workflows (${PINS[*]}) — one pin of record only"
+            exit 1
+          elif [ -n "$JOB_WORKFLOW_SHA" ] && [ "$HEAD_SHA" = "$JOB_WORKFLOW_SHA" ]; then
+            echo "no committed caller pin found; kit checkout rides github.job_workflow_sha $HEAD_SHA"
+          else
+            echo "::error::quality-gate refused: no full-SHA kit pin committed in the consumer's workflows and github.job_workflow_sha is unreliable ('$JOB_WORKFLOW_SHA') — a gate floating on kit MAIN gauges nothing reproducible; pin the caller stub per templates/quality.caller.yml"
+            exit 1
+          fi
 
       - name: Install the gauge kit + pinned tool battery
         # [dev] carries ruff/mypy/mypy-baseline/pytest/complexipy — one gauge
@@ -98,9 +135,11 @@ jobs:
         run: |
           CF_SOURCE_ROOT="$(cf-repo-config source-root)"
           CF_PACKAGE_DIR="$(cf-repo-config package-dir)"
+          CF_FIRST_PARTY="$(cf-repo-config first-party)"
           echo "CF_SOURCE_ROOT=$CF_SOURCE_ROOT" >> "$GITHUB_ENV"
           echo "CF_PACKAGE_DIR=$CF_PACKAGE_DIR" >> "$GITHUB_ENV"
-          echo "resolved source root: $CF_SOURCE_ROOT / package dir: $CF_PACKAGE_DIR"
+          echo "CF_FIRST_PARTY=$CF_FIRST_PARTY" >> "$GITHUB_ENV"
+          echo "resolved source root: $CF_SOURCE_ROOT / package dir: $CF_PACKAGE_DIR / first-party: $CF_FIRST_PARTY"
 
       - name: Install the consumer package
         # Monorepo layouts (declared package_dir) install from the package's
@@ -134,7 +173,13 @@ jobs:
         # Same doctrine as mypy below: the config the verdict is graded by
         # comes from the kit checkout at the pinned SHA, so a consumer cannot
         # weaken the gauge it is graded by (hollow-vendored-copy refusal).
-        run: ruff check . --config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"
+        # known-first-party is DERIVED from the consumer's resolved source
+        # root (cf-repo-config first-party): a shared gauge file cannot name
+        # every consumer's packages, and ruff's on-disk detection mis-files
+        # first-party imports that do not resolve — the kit's I001 verdict
+        # then contradicts the repo's legacy isort config. The inline value
+        # is derived from committed state, never a caller knob.
+        run: ruff check . --config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml" --config "lint.isort.known-first-party=$CF_FIRST_PARTY"
 
       - name: ruff format --check (the kit's pinned gauge)
         run: ruff format --check . --config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"
@@ -189,6 +234,26 @@ jobs:
             exit 1
           else
             echo "::notice::mypy ratchet SKIPPED — no Python files in this repo"
+          fi
+
+      - name: complexipy through the snapshot ratchet (a Python repo MUST carry the watermark)
+        # Cognitive complexity rides the committed complexipy-snapshot.json
+        # watermark: a plain run compares against the snapshot in CWD — no
+        # separate ratchet flag exists in 5.5.0; comparison is the default
+        # (docs/tool-spikes.md). NEVER piped: piping masks the exit code.
+        # Same presence doctrine as the mypy baseline: the conventions define
+        # this as a gate, and green-by-missing-file is opt-in gaming — a repo
+        # with Python REFUSES to pass without its snapshot; only a
+        # Python-free repo may skip, visibly. The snapshot does NOT
+        # auto-shrink: re-snapshot on merge stays the runbook's job.
+        run: |
+          if [ -f complexipy-snapshot.json ]; then
+            complexipy "$CF_SOURCE_ROOT"
+          elif find . -name '*.py' -not -path '*/.*' | grep -q .; then
+            echo "::error::complexipy ratchet REFUSED — Python files present but no complexipy-snapshot.json; boot the snapshot per configs/BASELINE-CONVENTIONS.md (complexipy <source-root> --snapshot-create from the repo root), even when clean"
+            exit 1
+          else
+            echo "::notice::complexipy ratchet SKIPPED — no Python files in this repo"
           fi
 
       - name: pytest

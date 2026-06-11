@@ -22,6 +22,7 @@ import pytest
 
 from cf_quality.errors import GateError
 from cf_quality.repo_config import (
+    first_party_packages,
     load,
     main,
     resolve_package_dir,
@@ -219,3 +220,86 @@ def test_main_exits_two_typed_on_invalid_declaration(
     assert main(["source-root", "--root", str(repo)]) == 2
     err = capsys.readouterr().err
     assert "GATE_CONFIG_INVALID" in err
+
+
+# --- first-party derivation (the isort alignment defect) -----------------------
+#
+# The kit's shared ruff gauge cannot statically name every consumer's packages,
+# and ruff's path-based detection mis-files imports that do not resolve on disk
+# (bonfire: `bonfire.tests.*` has no src/bonfire/tests, so the kit's gauge
+# sorted it third-party while the repo's legacy `known-first-party = ["bonfire"]`
+# holds it first-party — fixing the kit's I001 created NEW legacy I001).
+# The gate therefore DERIVES the first-party names from the consumer's own
+# resolved source root and feeds them to ruff at gauge time.
+
+
+class TestFirstPartyPackages:
+    def test_src_layout_names_the_package(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path)
+        (repo / "src" / "bonfire").mkdir(parents=True)
+        (repo / "src" / "bonfire" / "__init__.py").write_text("", encoding="utf-8")
+        assert first_party_packages(repo) == ["bonfire"]
+
+    def test_declared_source_root_names_its_packages(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        _declare(repo, '[tool.cf-quality]\nsource_root = "server/src"\n')
+        assert first_party_packages(repo) == ["pkg"]
+
+    def test_top_level_modules_count(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path)
+        src = repo / "src"
+        src.mkdir()
+        (src / "single.py").write_text("x = 1\n", encoding="utf-8")
+        (src / "pkg").mkdir()
+        (src / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+        assert first_party_packages(repo) == ["pkg", "single"]
+
+    def test_flat_layout_excludes_non_shipping_dirs(self, tmp_path: Path) -> None:
+        # Repo-root source root (no src/): tests/docs/scripts are not
+        # first-party import names; hidden dirs never count.
+        repo = _repo(tmp_path)
+        for name in ("app", "tests", "docs", "scripts"):
+            (repo / name).mkdir()
+            (repo / name / "__init__.py").write_text("", encoding="utf-8")
+        (repo / ".hidden").mkdir()
+        (repo / ".hidden" / "__init__.py").write_text("", encoding="utf-8")
+        assert first_party_packages(repo) == ["app"]
+
+    def test_namespace_package_without_init_counts(self, tmp_path: Path) -> None:
+        # PEP 420: a dir holding .py files is importable without __init__.py.
+        repo = _repo(tmp_path)
+        (repo / "src" / "nspkg" / "inner").mkdir(parents=True)
+        (repo / "src" / "nspkg" / "inner" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+        assert first_party_packages(repo) == ["nspkg"]
+
+    def test_python_free_repo_yields_empty(self, tmp_path: Path) -> None:
+        repo = _repo(tmp_path)
+        (repo / "src").mkdir()
+        (repo / "src" / "app.js").write_text("const x = 1;\n", encoding="utf-8")
+        assert first_party_packages(repo) == []
+
+    def test_main_prints_toml_array(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The CLI form is a TOML array literal so the workflow can splice it
+        # straight into `--config "lint.isort.known-first-party=..."`.
+        repo = _repo(tmp_path)
+        (repo / "src" / "bonfire").mkdir(parents=True)
+        (repo / "src" / "bonfire" / "__init__.py").write_text("", encoding="utf-8")
+        assert main(["first-party", "--root", str(repo)]) == 0
+        assert capsys.readouterr().out.strip() == '["bonfire"]'
+
+    def test_main_first_party_empty_array_for_python_free(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _repo(tmp_path)
+        assert main(["first-party", "--root", str(repo)]) == 0
+        assert capsys.readouterr().out.strip() == "[]"
+
+    def test_main_first_party_invalid_declaration_exits_typed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _repo(tmp_path)
+        _declare(repo, '[tool.cf-quality]\nsource_root = "ghost"\n')
+        assert main(["first-party", "--root", str(repo)]) == 2
+        assert "GATE_CONFIG_INVALID" in capsys.readouterr().err

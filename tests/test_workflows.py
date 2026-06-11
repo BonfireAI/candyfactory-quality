@@ -153,6 +153,7 @@ def test_gate_runs_full_battery_in_order() -> None:
         "cf-exemptions",
         "cf-import-contract",
         "mypy-baseline filter",
+        "complexipy",
         "pytest",
     ]
     positions = [script.find(cmd) for cmd in battery]
@@ -205,6 +206,7 @@ def test_self_ci_runs_the_same_battery_on_itself() -> None:
         "cf-recursion-check",
         "cf-exemptions",
         "mypy",
+        "complexipy",
         "pytest",
     ):
         assert cmd in script, f"self-ci missing battery command: {cmd}"

@@ -36,10 +36,14 @@ making Wizard-gating mechanical, never prose:
     or ``scripts/check_host_free.py`` the gate runs them and propagates
     their exit codes; absent scripts are skipped silently.
 
-The measured surface is ``<root>/src`` when it exists; otherwise the layout
-is DISCOVERED (top-level packages/modules outside tests/docs/scripts), so a
-flat or app layout is measured, never a silent no-op (the refuter's
-src-only escape).
+The measured surface is the committed ``[tool.cf-quality] source_root`` when
+declared — resolved through cf-repo-config exactly like the gauges (the
+mexxa main-green pass proved the old behavior: a JS repo-root ``src/`` was
+discovered, the declared ``server/src`` never visited, and every registered
+exemption was documentation-grade). Absent a declaration, ``<root>/src``
+when it exists; otherwise the layout is DISCOVERED (top-level
+packages/modules outside tests/docs/scripts), so a flat or app layout is
+measured, never a silent no-op (the refuter's src-only escape).
 
 Comments are read via :mod:`tokenize` (COMMENT tokens only), so suppression
 text inside string literals never trips the gate.
@@ -58,6 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cf_quality import repo_config
 from cf_quality.errors import GateError, GateViolation
 
 GATED_NOQA_RULES = frozenset({"C901", "PLR0915"})
@@ -71,21 +76,10 @@ _GATED_FAMILY_RE = re.compile(r"^(?:S|BLE)\d+$")
 GATED_TYPE_IGNORE_CODES = frozenset({"override"})
 FOLD_IN_SCRIPTS = ("check_english.py", "check_host_free.py")
 #: Directories never measured for suppressions (tests carry their own
-#: per-file-ignores discipline; the rest is non-shipping surface).
-EXCLUDED_SCAN_DIRS = frozenset(
-    {
-        "tests",
-        "test",
-        "docs",
-        "examples",
-        "scripts",
-        "__pycache__",
-        "node_modules",
-        "build",
-        "dist",
-        "venv",
-    }
-)
+#: per-file-ignores discipline; the rest is non-shipping surface). The set
+#: itself lives in repo_config — one gauge-block, shared with the
+#: first-party derivation, never two lists drifting apart.
+EXCLUDED_SCAN_DIRS = repo_config.NON_SHIPPING_DIRS
 REQUIRED_ENTRY_KEYS = ("file", "symbol_or_line", "rule", "reason", "approver")
 
 _NOSEC_RE = re.compile(r"#\s*nosec\b(.*)")
@@ -226,11 +220,16 @@ def _is_gated_code(code: str) -> bool:
 
 
 def _discover_scan_paths(root: Path) -> list[Path]:
-    """``src/`` when present; otherwise every top-level Python location.
+    """The declared ``source_root`` when committed; else ``src/`` when
+    present; otherwise every top-level Python location.
 
-    A flat or app layout is measured, never a silent no-op: top-level
-    ``*.py`` files and every non-excluded directory holding Python count.
+    A declared layout is honored exactly like the gauges honor it (typed
+    failure on an invalid declaration, never a silent fallback). A flat or
+    app layout is measured, never a silent no-op: top-level ``*.py`` files
+    and every non-excluded directory holding Python count.
     """
+    if repo_config.load(root).source_root is not None:
+        return [repo_config.resolve_source_root(root)]
     src = root / "src"
     if src.is_dir():
         return [src]
