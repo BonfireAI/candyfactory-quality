@@ -172,6 +172,52 @@ def test_non_string_value_fails_typed(tmp_path: Path) -> None:
     assert excinfo.value.code == "GATE_CONFIG_INVALID"
 
 
+# --- client_repo: the membrane declaration (client repos get gate-config only) --
+
+
+def test_client_repo_defaults_to_false(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    assert load(repo).client_repo is False
+
+
+def test_client_repo_true_parses(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _declare(repo, "[tool.cf-quality]\nclient_repo = true\n")
+    assert load(repo).client_repo is True
+
+
+def test_client_repo_false_is_explicitly_not_a_client(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _declare(repo, "[tool.cf-quality]\nclient_repo = false\n")
+    assert load(repo).client_repo is False
+
+
+def test_client_repo_non_bool_fails_typed(tmp_path: Path) -> None:
+    # A tampered declaration ("yes", 1, "true") is not a decision — the
+    # membrane is Wizard-gated committed state, never a loose string.
+    repo = _repo(tmp_path)
+    _declare(repo, '[tool.cf-quality]\nclient_repo = "yes"\n')
+    with pytest.raises(GateError) as excinfo:
+        load(repo)
+    assert excinfo.value.code == "GATE_CONFIG_INVALID"
+
+
+def test_client_repo_integer_fails_typed(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _declare(repo, "[tool.cf-quality]\nclient_repo = 1\n")
+    with pytest.raises(GateError) as excinfo:
+        load(repo)
+    assert excinfo.value.code == "GATE_CONFIG_INVALID"
+
+
+def test_client_repo_combines_with_layout_keys(tmp_path: Path) -> None:
+    repo = _monorepo(tmp_path)
+    _declare(repo, '[tool.cf-quality]\nsource_root = "server/src"\nclient_repo = true\n')
+    config = load(repo)
+    assert config.client_repo is True
+    assert config.source_root == "server/src"
+
+
 def test_malformed_toml_fails_typed(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     _declare(repo, "[tool.cf-quality\nsource_root = ")

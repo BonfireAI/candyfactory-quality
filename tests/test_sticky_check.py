@@ -298,3 +298,134 @@ def test_main_mount_over_tampered_exit_two(
     assert main(["mount", str(repo)]) == 2
     err = capsys.readouterr().err
     assert "STICKY_MOUNT_TAMPERED" in err
+
+
+# --- the client membrane (client repos receive gate-config only, never chrome) --
+#
+# The canon's client-membrane rule and the gate contradicted each other:
+# client repos must NOT carry the sticky, but cf-sticky-check failed
+# STICKY_CLAUDE_MD_MISSING with no waiver knob — a client repo's gate could
+# never go fully green. The waiver is a COMMITTED declaration
+# ([tool.cf-quality] client_repo = true), Wizard-gated like any doctrine
+# surface, honored loudly (never silently), and two-way: a declared client
+# repo carrying the sticky anyway FAILS.
+
+
+def _declare_client(repo: Path, value: str = "true") -> None:
+    (repo / ".cf-quality.toml").write_text(
+        f"[tool.cf-quality]\nclient_repo = {value}\n", encoding="utf-8"
+    )
+
+
+# R1: declared client + no CLAUDE.md -> waived, loudly.
+
+
+def test_client_repo_without_claude_md_passes(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, None)
+    _declare_client(repo)
+    assert check(repo / "CLAUDE.md") == []
+
+
+def test_main_client_waiver_is_loud_never_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _repo_with(tmp_path, None)
+    _declare_client(repo)
+    assert main(["check", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "client membrane declared" in out
+    assert "ADR 0030" in out  # the rule the waiver executes is named
+
+
+# R2: no declaration -> no behavior change for the fleet.
+
+
+def test_undeclared_repo_without_claude_md_still_fails(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, None)
+    violations = check(repo / "CLAUDE.md")
+    assert [v.code for v in violations] == ["STICKY_CLAUDE_MD_MISSING"]
+
+
+def test_client_repo_false_behaves_as_undeclared(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, None)
+    _declare_client(repo, value="false")
+    violations = check(repo / "CLAUDE.md")
+    assert [v.code for v in violations] == ["STICKY_CLAUDE_MD_MISSING"]
+
+
+# R3: the membrane is two-way — a declared client repo must NOT carry chrome.
+
+
+def test_client_repo_carrying_pristine_block_fails(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, "# Client repo\n\n" + canonical_text())
+    _declare_client(repo)
+    violations = check(repo / "CLAUDE.md")
+    assert [v.code for v in violations] == ["STICKY_CLIENT_MEMBRANE_BREACHED"]
+
+
+def test_client_repo_carrying_chewed_block_fails(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, _tampered_block())
+    _declare_client(repo)
+    violations = check(repo / "CLAUDE.md")
+    assert [v.code for v in violations] == ["STICKY_CLIENT_MEMBRANE_BREACHED"]
+
+
+def test_client_repo_carrying_v1_era_block_fails(tmp_path: Path) -> None:
+    # The observed real-world shape: a client repo mounted with an OLDER
+    # sticky (same heading, different body) — chrome is chrome, any vintage.
+    v1_style = (
+        "<!-- declared mirror of candyfactory-canon ADR 0029 · mounted by"
+        " candyfactory-quality -->\n## The BubbleGum Law (form)\n\nThis repository"
+        " is governed by **the BubbleGum Law** — an older body text.\n"
+    )
+    repo = _repo_with(tmp_path, v1_style)
+    _declare_client(repo)
+    violations = check(repo / "CLAUDE.md")
+    assert [v.code for v in violations] == ["STICKY_CLIENT_MEMBRANE_BREACHED"]
+
+
+def test_client_repo_with_benign_claude_md_passes(tmp_path: Path) -> None:
+    # The membrane forbids the sticky/chrome, not the file: a client repo may
+    # carry its own instructions.
+    repo = _repo_with(tmp_path, "# Client repo\n\nClient-lane instructions only.\n")
+    _declare_client(repo)
+    assert check(repo / "CLAUDE.md") == []
+
+
+def test_client_repo_prose_mention_is_not_a_breach(tmp_path: Path) -> None:
+    # Naming the law in prose is not carrying its chrome.
+    repo = _repo_with(tmp_path, "# Client repo\n\nWe follow the BubbleGum Law upstream.\n")
+    _declare_client(repo)
+    assert check(repo / "CLAUDE.md") == []
+
+
+# Tampered/incomplete declaration fails loud and typed.
+
+
+def test_client_repo_tampered_declaration_fails_typed(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, None)
+    _declare_client(repo, value='"yes"')
+    with pytest.raises(GateError) as excinfo:
+        check(repo / "CLAUDE.md")
+    assert excinfo.value.code == "GATE_CONFIG_INVALID"
+
+
+def test_main_client_tampered_declaration_exit_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _repo_with(tmp_path, None)
+    _declare_client(repo, value='"yes"')
+    assert main(["check", str(repo)]) == 2
+    assert "GATE_CONFIG_INVALID" in capsys.readouterr().err
+
+
+# The mount refuses to push chrome through the membrane.
+
+
+def test_mount_refuses_on_declared_client_repo(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, None)
+    _declare_client(repo)
+    with pytest.raises(GateError) as excinfo:
+        mount(repo / "CLAUDE.md")
+    assert excinfo.value.code == "STICKY_MOUNT_CLIENT_MEMBRANE"
+    assert not (repo / "CLAUDE.md").is_file()  # nothing was written

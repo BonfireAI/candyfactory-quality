@@ -21,6 +21,23 @@ absent; idempotent (a second mount is a no-op); refuses to mount over ANY
 recognizable near-copy of the block — chewed gum (heading included) is never
 silently duplicated or papered over.
 
+The client membrane (ADR 0030 §11): client repos receive gate-config ONLY —
+never sticky/chrome. A repo declaring ``[tool.cf-quality] client_repo = true``
+(committed, Wizard-gated state — see :mod:`cf_quality.repo_config`) is
+therefore waived from carrying the block, LOUDLY (the CLI prints the waiver,
+never a silent pass), and the membrane is two-way:
+
+- declared client + no CLAUDE.md (or a CLAUDE.md without chrome) -> pass,
+  with the visible client-membrane notice;
+- declared client + ANY recognizable sticky chrome (the canonical block,
+  a chewed or older-vintage copy, or the kit's mirror header) fails
+  ``STICKY_CLIENT_MEMBRANE_BREACHED``;
+- ``mount`` refuses a declared client repo (``STICKY_MOUNT_CLIENT_MEMBRANE``)
+  — the kit never pushes chrome through the membrane;
+- an undeclared repo keeps today's behavior exactly, and a tampered
+  declaration fails typed (``GATE_CONFIG_INVALID``) — the waiver cannot be
+  adopted by accident or by a loose string.
+
 The canonical text is loaded from the KIT's own packaged data file
 (``cf_quality/data/sticky-intro.md``, via :mod:`importlib.resources` so wheel
 and editable installs resolve identically), never from the consumer repo —
@@ -46,11 +63,20 @@ import sys
 from importlib import resources
 from pathlib import Path
 
+from cf_quality import repo_config
 from cf_quality.errors import GateError, GateViolation
 
 MIRROR_HEADER = (
     "<!-- declared mirror of candyfactory-canon ADR 0029 + ADR 0030"
     " · mounted by candyfactory-quality -->"
+)
+#: Any vintage of the kit's mount header marks chrome — the v1 header named
+#: only ADR 0029, so the breach check keys on the stable mounted-by suffix.
+_MOUNT_MARKER = "mounted by candyfactory-quality"
+#: The loud waiver notice — printed whenever the membrane is honored.
+CLIENT_MEMBRANE_NOTICE = (
+    "=== client membrane declared — sticky intro not mounted per ADR 0030 §11 "
+    "(client repos receive gate-config only, never chrome) ==="
 )
 
 _DATA_FILENAME = "sticky-intro.md"
@@ -203,9 +229,44 @@ def _duplicated(path: str, detail: str) -> GateViolation:
     )
 
 
+def _membrane_violations(claude_md: Path, canonical_lines: list[str]) -> list[GateViolation]:
+    """The two-way membrane: a declared client repo must NOT carry chrome.
+
+    Chrome is recognized by the canonical heading line, the kit's mount
+    marker (any vintage — the v1 header differs from today's), or an exact /
+    near copy of the canonical block in the RAW bytes (a buried copy is
+    chrome too). Prose merely naming the law is not chrome.
+    """
+    raw_lines = _normalize(claude_md.read_text(encoding="utf-8")).splitlines()
+    raw_pairs = list(enumerate(raw_lines, start=1))
+    heading = canonical_lines[0]
+    carries_chrome = (
+        any(line.strip() == heading for line in raw_lines)
+        or any(_MOUNT_MARKER in line for line in raw_lines)
+        or bool(_find_block(canonical_lines, raw_pairs))
+        or _near_match_start(canonical_lines, raw_pairs) is not None
+    )
+    if not carries_chrome:
+        return []
+    return [
+        GateViolation(
+            code="STICKY_CLIENT_MEMBRANE_BREACHED",
+            message=(
+                "this repo declares client_repo = true but carries sticky chrome — "
+                "the membrane is two-way: client repos receive gate-config only, "
+                "never the sticky intro (remove the block or the declaration)"
+            ),
+            path=str(claude_md),
+        )
+    ]
+
+
 def check(claude_md: Path) -> list[GateViolation]:
     """Gauge one CLAUDE.md against the kit's canonical sticky block."""
+    client = repo_config.load(claude_md.parent).client_repo
     if not claude_md.is_file():
+        if client:
+            return []  # the membrane waives the mount; the CLI prints it loud
         return [
             GateViolation(
                 code="STICKY_CLAUDE_MD_MISSING",
@@ -214,6 +275,8 @@ def check(claude_md: Path) -> list[GateViolation]:
             )
         ]
     canonical_lines = canonical_text().splitlines()
+    if client:
+        return _membrane_violations(claude_md, canonical_lines)
     raw_lines = _normalize(claude_md.read_text(encoding="utf-8")).splitlines()
     live = _live_lines(raw_lines)
     occurrences = _find_block(canonical_lines, live)
@@ -257,8 +320,20 @@ def mount(claude_md: Path) -> bool:
     """Append the canonical block when absent. Returns True iff it wrote.
 
     Refuses on ANY recognizable near-copy (heading chewed or not) so a
-    tampered block is never silently duplicated or papered over.
+    tampered block is never silently duplicated or papered over; refuses a
+    declared client repo outright — the kit never pushes chrome through the
+    client membrane.
     """
+    if repo_config.load(claude_md.parent).client_repo:
+        raise GateError(
+            code="STICKY_MOUNT_CLIENT_MEMBRANE",
+            message=(
+                "refusing to mount the sticky intro into a declared client repo — "
+                "client repos receive gate-config only, never sticky/chrome "
+                "(the client membrane, ADR 0030 §11)"
+            ),
+            context={"path": str(claude_md)},
+        )
     canonical = canonical_text()
     canonical_lines = canonical.splitlines()
     existing = _normalize(claude_md.read_text(encoding="utf-8")) if claude_md.is_file() else ""
@@ -285,6 +360,8 @@ def _run_check(target: Path) -> int:
     violations = check(target)
     for violation in violations:
         print(json.dumps(violation.to_dict(), ensure_ascii=False))
+    if not violations and repo_config.load(target.parent).client_repo:
+        print(CLIENT_MEMBRANE_NOTICE)  # the waiver is loud, never silent
     return 1 if violations else 0
 
 
