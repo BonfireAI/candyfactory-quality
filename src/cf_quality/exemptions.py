@@ -16,7 +16,14 @@ making Wizard-gating mechanical, never prose:
     (``# noqa: S###`` and ``# nosec B###``), and the Elegance Law's
     blind-except ban (``# noqa: BLE###``) — everything the gauge selects as a
     security or honesty gate, per the refuter's S602/BLE001 bypass. Other
-    noqa codes (style/imports: E/F/I/UP/B) ride on ruff + review;
+    noqa codes (style/imports: E/F/I/UP/B) ride on ruff + review. The
+    substitutability gauge gets the same protection: a coded
+    ``type: ignore[override]`` comment silences mypy's [override] (Liskov)
+    error entirely, so the override family is registry-gated too (rule
+    ``override``); other type-ignore codes and bare ``# type: ignore`` stay
+    the mypy gauge's jurisdiction (``warn_unused_ignores``). Registered
+    sites pass LOUDLY — each covered suppression is printed with its entry,
+    a visible exemption, never a silent one;
 (c) the exemption count is ratcheted: ``exemptions.json`` carries
     ``frozen_count``. Entries may be removed freely; additions require
     bumping ``frozen_count``, and the gate prints the ratchet loudly on
@@ -57,6 +64,11 @@ GATED_NOQA_RULES = frozenset({"C901", "PLR0915"})
 #: Whole rule families that are registry-gated code-by-code: the ruff-ported
 #: bandit battery (S###) and the Elegance Law's blind-except ban (BLE###).
 _GATED_FAMILY_RE = re.compile(r"^(?:S|BLE)\d+$")
+#: mypy error codes whose ``# type: ignore[...]`` suppression is registry-gated:
+#: ``override`` is the one token that silences the substitutability gauge
+#: (mypy's [override] / Liskov error) entirely. Other codes ride the mypy
+#: gauge (``warn_unused_ignores`` fails the stale ones) + review.
+GATED_TYPE_IGNORE_CODES = frozenset({"override"})
 FOLD_IN_SCRIPTS = ("check_english.py", "check_host_free.py")
 #: Directories never measured for suppressions (tests carry their own
 #: per-file-ignores discipline; the rest is non-shipping surface).
@@ -78,6 +90,7 @@ REQUIRED_ENTRY_KEYS = ("file", "symbol_or_line", "rule", "reason", "approver")
 
 _NOSEC_RE = re.compile(r"#\s*nosec\b(.*)")
 _NOQA_RE = re.compile(r"#\s*noqa\b:?\s*([A-Z]+[0-9]+(?:[\s,]+[A-Z]+[0-9]+)*)?")
+_TYPE_IGNORE_RE = re.compile(r"#\s*type:\s*ignore\s*\[([^\]]+)\]")
 _B_CODE_RE = re.compile(r"\bB\d{3}\b")
 _CODE_SPLIT_RE = re.compile(r"[\s,]+")
 
@@ -181,7 +194,30 @@ def _classify_comment(
                 line=line,
             )
         )
+    suppressions.extend(_type_ignore_suppressions(rel_path, line, text, symbol))
     return suppressions, violations
+
+
+def _type_ignore_suppressions(
+    rel_path: str, line: int, text: str, symbol: str | None
+) -> list[Suppression]:
+    """Gated ``# type: ignore[...]`` codes found in one comment.
+
+    Only the codes in :data:`GATED_TYPE_IGNORE_CODES` are registry-gated
+    (the override family — the one comment that blinds the substitutability
+    gauge). A multi-code ignore (``[override, misc]``) is still gated: hiding
+    the token in a code list is the obvious bypass. A bare ``# type: ignore``
+    names no code and stays the mypy gauge's jurisdiction.
+    """
+    match = _TYPE_IGNORE_RE.search(text)
+    if not match:
+        return []
+    codes = _CODE_SPLIT_RE.split(match.group(1).strip())
+    return [
+        Suppression(rel_path, line, code, symbol)
+        for code in codes
+        if code in GATED_TYPE_IGNORE_CODES
+    ]
 
 
 def _is_gated_code(code: str) -> bool:
@@ -327,22 +363,26 @@ def check(root: Path) -> tuple[list[GateViolation], list[str]]:
             )
         return violations, ["no exemptions.json and no gated suppressions — nothing to register"]
     entries, frozen_count = config
-    violations.extend(_match_suppressions(suppressions, entries))
+    match_violations, registered_lines = _match_suppressions(suppressions, entries)
+    violations.extend(match_violations)
     ratchet_violations, lines = _ratchet_report(len(entries), frozen_count)
     violations.extend(ratchet_violations)
-    return violations, lines
+    return violations, [*lines, *registered_lines]
 
 
 def _match_suppressions(
     suppressions: list[Suppression], entries: list[dict[str, Any]]
-) -> list[GateViolation]:
+) -> tuple[list[GateViolation], list[str]]:
     """Every suppression needs an entry; every entry covers at most ONE.
 
     The 1:1 discipline is the ratchet's truth condition: N suppressions
     sharing one entry would keep ``frozen_count`` flat while live
-    suppressions grow (the refuter's collision undercount).
+    suppressions grow (the refuter's collision undercount). Covered
+    suppressions are reported LOUDLY (site + entry) — a registered
+    exemption is visible, never silent.
     """
     violations: list[GateViolation] = []
+    registered: list[str] = []
     matched_counts = [0] * len(entries)
     for suppression in suppressions:
         hits = [i for i, entry in enumerate(entries) if _matches(suppression, entry)]
@@ -359,6 +399,8 @@ def _match_suppressions(
                     context={"rule": suppression.rule, "symbol": suppression.symbol},
                 )
             )
+        else:
+            registered.append(_registered_line(suppression, hits[0], entries[hits[0]]))
         for index in hits:
             matched_counts[index] += 1
     for index, count in enumerate(matched_counts):
@@ -374,7 +416,17 @@ def _match_suppressions(
                     context={"entry_index": index, "matched_suppressions": count},
                 )
             )
-    return violations
+    return violations, registered
+
+
+def _registered_line(suppression: Suppression, index: int, entry: dict[str, Any]) -> str:
+    """One loud report line for a covered suppression: the site and its entry."""
+    site = f"{suppression.path}:{suppression.line}"
+    symbol = f" ({suppression.symbol})" if suppression.symbol else ""
+    return (
+        f"registered: {site} '{suppression.rule}'{symbol} — covered by entry {index} "
+        f"[{entry['symbol_or_line']}], approver {entry['approver']}"
+    )
 
 
 def _run_fold_ins(root: Path) -> tuple[list[str], int]:
