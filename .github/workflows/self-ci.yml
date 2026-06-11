@@ -61,6 +61,9 @@ jobs:
       - name: cf-exemptions — the kit's suppressions trace to reasoned entries
         run: cf-exemptions
 
+      - name: cf-import-contract — the kit's own layering contract holds
+        run: cf-import-contract --root .
+
       - name: mypy (zero baseline — the new repo owes 0 type errors, bare)
         run: mypy src
 

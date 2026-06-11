@@ -91,3 +91,23 @@ def test_clean_wheel_install_reports_absence_not_gate_failure(
     proc = _run([str(script), "check", str(fixture)])
     assert proc.returncode == 1, f"exit {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
     assert "STICKY_INTRO_ABSENT" in proc.stdout
+
+
+def test_import_contract_verdict_rides_a_clean_wheel_install(
+    clean_install: Path, tmp_path: Path
+) -> None:
+    # The same harsh oracle for the layering gate: from a NON-EDITABLE install
+    # (no source tree on sys.path) the console script must still deliver a
+    # verdict. The CONTRACT_MISSING path never reaches lint-imports, so the
+    # clean venv needs only the wheel — exit 1 with the verdict, never an
+    # ImportError crash.
+    fixture = tmp_path / "consumer"
+    (fixture / "src" / "widget").mkdir(parents=True)
+    (fixture / "src" / "widget" / "__init__.py").write_text("", encoding="utf-8")
+    (fixture / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "0.0.0"\n', encoding="utf-8"
+    )
+    script = clean_install / "bin" / "cf-import-contract"
+    proc = _run([str(script), "--root", str(fixture)])
+    assert proc.returncode == 1, f"exit {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
+    assert "CONTRACT_MISSING" in proc.stdout
