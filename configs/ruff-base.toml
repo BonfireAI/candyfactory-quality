@@ -10,6 +10,17 @@
 #   line-length 100 · target py312
 # Consumer mounts: copy this file to <repo>/ruff.toml (or `extend` it) and add
 # a ruff-sync stanza pointing back at this kit's pinned SHA.
+#
+# known-first-party (isort) is deliberately NOT set here: a shared gauge file
+# cannot name every consumer's packages, and ruff's on-disk detection mis-files
+# first-party imports that do not resolve on disk (modules authored RED, tests
+# addressed by package path) — measured on a consumer where fixing the kit's
+# I001 created NEW legacy-isort I001. The gate DERIVES the names per consumer
+# (`cf-repo-config first-party`, from the resolved source root) and passes them
+# inline: `--config "lint.isort.known-first-party=[...]"`. A vendored local
+# copy MAY add [lint.isort] known-first-party with the repo's own names for
+# editor/pre-commit parity — like per-file-ignores, it cannot weaken the graded
+# verdict (CI derives its own value from committed state).
 
 line-length = 100
 target-version = "py312"

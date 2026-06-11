@@ -35,6 +35,25 @@ from cf_quality.errors import GateError
 CONFIG_FILENAME = ".cf-quality.toml"
 _ALLOWED_KEYS = frozenset({"source_root", "package_dir"})
 
+#: Directory names that are never first-party import surface when the source
+#: root is the repo root itself (tests carry their own per-file-ignores
+#: discipline; the rest is non-shipping). cf-exemptions shares this set for
+#: its scan discovery — one gauge-block, never two lists drifting apart.
+NON_SHIPPING_DIRS = frozenset(
+    {
+        "tests",
+        "test",
+        "docs",
+        "examples",
+        "scripts",
+        "__pycache__",
+        "node_modules",
+        "build",
+        "dist",
+        "venv",
+    }
+)
+
 
 @dataclass(frozen=True)
 class RepoConfig:
@@ -158,29 +177,61 @@ def resolve_package_dir(root: Path) -> Path:
     return declared
 
 
+def first_party_packages(root: Path) -> list[str]:
+    """The consumer's own top-level import names, derived from its source root.
+
+    The shared ruff gauge cannot statically name every consumer's packages,
+    and ruff's on-disk detection mis-files first-party imports that do not
+    resolve on disk (a module authored RED before it exists, or tests
+    addressed by package path) — the kit's I001 verdict then contradicts the
+    consumer's legacy ``known-first-party``. The gate therefore derives the
+    names from the consumer's OWN resolved source root: top-level packages
+    (any directory holding Python — PEP 420 needs no ``__init__.py``) and
+    top-level modules. At a repo-root source root the non-shipping
+    directories are excluded; hidden entries never count.
+    """
+    source_root = resolve_source_root(root)
+    at_repo_root = source_root.resolve() == root.resolve()
+    names: set[str] = set()
+    for child in source_root.iterdir():
+        if child.name.startswith(".") or (at_repo_root and child.name in NON_SHIPPING_DIRS):
+            continue
+        if child.is_file() and child.suffix == ".py":
+            names.add(child.stem)
+        elif child.is_dir() and next(child.rglob("*.py"), None) is not None:
+            names.add(child.name)
+    return sorted(names)
+
+
 def _relative_form(root: Path, target: Path) -> str:
     """Root-relative POSIX form for shell consumption ('.' for the root itself)."""
     return target.resolve().relative_to(root.resolve()).as_posix()
 
 
+def _resolve_field(root: Path, field: str) -> str:
+    """One CLI field's stdout form; first-party is a TOML/JSON array literal
+    so the workflow can splice it into ``lint.isort.known-first-party=...``."""
+    if field == "first-party":
+        return json.dumps(first_party_packages(root))
+    target = resolve_source_root(root) if field == "source-root" else resolve_package_dir(root)
+    return _relative_form(root, target)
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Exit 0 resolved (path on stdout) · 2 invalid declaration (typed, stderr)."""
+    """Exit 0 resolved (value on stdout) · 2 invalid declaration (typed, stderr)."""
     parser = argparse.ArgumentParser(
         prog="cf-repo-config",
         description="Resolve the consumer repo's declared layout ([tool.cf-quality]).",
     )
-    parser.add_argument("field", choices=("source-root", "package-dir"))
+    parser.add_argument("field", choices=("source-root", "package-dir", "first-party"))
     parser.add_argument("--root", default=".", help="repo root (default: cwd)")
     args = parser.parse_args(argv)
-    root = Path(args.root)
     try:
-        target = (
-            resolve_source_root(root) if args.field == "source-root" else resolve_package_dir(root)
-        )
+        resolved = _resolve_field(Path(args.root), args.field)
     except GateError as error:
         print(json.dumps(error.to_dict(), ensure_ascii=False), file=sys.stderr)
         return 2
-    print(_relative_form(root, target))
+    print(resolved)
     return 0
 
 

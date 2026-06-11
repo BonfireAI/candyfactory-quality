@@ -1,7 +1,7 @@
 # SHA-pin doctrine
 
 1. Every cross-repo workflow/action ref is pinned to a full commit SHA (40-hex) — never `@main`, never a tag (tags move; SHAs do not).
-2. The caller stub pins `quality-gate.yml@<full SHA>`; the gate checks the kit out at `github.job_workflow_sha`, so gauge scripts and workflow are always the same commit.
+2. The caller stub pins `quality-gate.yml@<full SHA>`; the gate checks the kit out at `github.job_workflow_sha` and RE-ANCHORS to the consumer's committed pin (the context value was observed EMPTY at run time, silently floating the checkout to kit main) — when no pin is determinable the gate refuses, never floats.
 3. Org Actions policy enforces full-SHA pinning, so an unpinned ref cannot even be merged.
 4. Dependabot (`github-actions` ecosystem, weekly) owns pin freshness: it opens pin-bump PRs in every consumer repo, so the pinned gauge cannot rot.
 5. A pin-bump PR is reviewed and merged by Anta like any change — the bump itself runs through the gate it bumps.

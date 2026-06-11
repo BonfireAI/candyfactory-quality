@@ -73,7 +73,15 @@ Full text in `docs/sha-pin-doctrine.md`; load-bearing points:
   exact commit the caller pinned the reusable workflow to — so the gate
   scripts and the workflow file are always the SAME commit. No gauge/workflow
   skew, and a consumer cannot be gated by scripts newer or older than the
-  workflow that invokes them.
+  workflow that invokes them. **Hardened 2026-06-11:** the context value was
+  OBSERVED empty at run time (the kit checkout received no `ref:` and
+  actions/checkout floated to the default branch — SHA-pinned consumers were
+  gauged by kit MAIN, counts irreproducible). The gate now re-anchors the kit
+  checkout to the pin the consumer COMMITTED in its caller stub, refuses two
+  distinct pins, and refuses to run at all when no pin is determinable —
+  fail-safe, never a silent float. Proven by a functional control rod in
+  `tests/test_workflows.py` (a real git fixture whose floating checkout must
+  be moved to the declared pin).
 - Dependabot (`github-actions` ecosystem) owns pin freshness via bump PRs;
   the bump itself runs through the gate it bumps. Org Actions policy enforces
   full-SHA pinning; the Constable's weekly sweep audits unpinned refs
@@ -419,7 +427,9 @@ ordinary PR.
 - **complexipy — set-like per function** (new offender fails; baselined
   offender worsening fails), but the snapshot does NOT auto-shrink: the
   re-snapshot-on-merge step is runbook procedure (§3 step 6), not yet CI
-  mechanism, and the complexipy step is not yet in `quality-gate.yml`.
+  mechanism. The complexipy step IS in `quality-gate.yml` (and `self-ci.yml`)
+  as of 2026-06-11, with the mypy-style presence rule: a Python repo without
+  its committed snapshot FAILS; only a Python-free repo skips, visibly.
 - **cf-exemptions — count-based by design**, and honestly so: `frozen_count`
   refuses silent growth, but a 1-for-1 entry swap at equal count is
   machine-visible only as an `exemptions.json` diff in review, not
@@ -510,9 +520,10 @@ Everything below is a known gap, on the record. Ordered by blood.
    wire live today.
 6. **Release tag guard** — the plan's floor carries "release refuses
    tag != pyproject.version"; no such step exists in either workflow yet.
-7. **complexipy in CI (§4.11)** — the watermark is runbook-only; no workflow
-   step, and re-snapshot-on-merge is manual. Improvements are not locked in
-   mechanically.
+7. **complexipy re-snapshot (§4.11)** — the gate step shipped 2026-06-11
+   (snapshot-presence rule included), but re-snapshot-on-merge stays manual:
+   improvements are not locked in mechanically until a merge-time re-snapshot
+   exists.
 8. **ruff-sync check (§4.9)** — not installed, not a step; vendored-gauge
    content fidelity is unforced unless the consumer mirror-declares it.
 9. **Required-status-check mounting + canary (§4.8)** — rulesets and the
@@ -589,10 +600,25 @@ unknown keys fail typed (a typo'd key silently ignored would be drift).
 Absent declaration keeps the historical discovery exactly — `src/` when
 present, else the repo root — and `mypy-baseline.txt` stays root-anchored.
 
+**cf-exemptions honors the declaration (2026-06-11).** The mexxa main-green
+pass measured the gap: cf-exemptions discovered the repo-root `src/` (JS in
+mexxa's case) and ignored the declared `source_root`, so every registered
+exemption was documentation-grade — the scanner never visited the files the
+entries covered. The scan surface now resolves through `cf-repo-config`
+exactly like the gauges (typed failure on an invalid declaration), with the
+control rod pinned in `tests/test_exemptions.py`: an unregistered
+suppression under a declared `server/src` MUST fail.
+
+**known-first-party rides the declared layout too (2026-06-11).** The shared
+ruff gauge cannot statically name consumer packages, and detection mis-files
+first-party imports that do not resolve on disk — `cf-repo-config
+first-party` derives the names from the resolved source root and the gate
+passes them inline to ruff (committed state, never a caller knob).
+
 Honest residue: a declared root holding one trivial `.py` while the real
 code lives elsewhere passes the resolver — the floor is non-emptiness, not
 completeness; review and the repo-root-wide gates (ruff, file-budget,
-exemptions, recursion at `.`) still measure the whole tree.
+recursion at `.`) still measure the whole tree.
 
 ---
 
