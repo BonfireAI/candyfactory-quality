@@ -37,9 +37,9 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from cf_quality.import_contract import lint_contract, main, scan_dynamic_imports
 
 from cf_quality.errors import GateError, GateViolation
+from cf_quality.import_contract import lint_contract, main, scan_dynamic_imports
 
 KIT_ROOT = Path(__file__).resolve().parents[1]
 BASELINE_FILENAME = "import-contract-baseline.json"
@@ -334,11 +334,7 @@ def test_r5_type_checking_guarded_upward_import_fails(
 ) -> None:
     _mount(
         tmp_path,
-        core=(
-            "from typing import TYPE_CHECKING\n"
-            "if TYPE_CHECKING:\n"
-            "    import tenants.acme\n"
-        ),
+        core=("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import tenants.acme\n"),
     )
     exit_code = _run_main(tmp_path, monkeypatch)
     out = capsys.readouterr().out
