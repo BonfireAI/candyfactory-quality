@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from cf_quality.mirror_check import (
     parse_mirrors,
     render_template,
 )
+from cf_quality.reporting import JSON_ENV_VAR
 
 TODAY = dt.date(2026, 6, 10)
 
@@ -246,3 +248,51 @@ class TestMain:
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=old))
         assert main(["--repo", str(tmp_path), "--max-pin-age-days", "7"]) == 1
         assert main(["--repo", str(tmp_path), "--max-pin-age-days", "60"]) == 0
+
+
+class TestMainJsonWireForm:
+    """Under CF_QUALITY_JSON the gate emits the canonical GateVerdict schema the
+    rest of the battery already speaks, so cf-gate gets rich per-finding verdicts
+    rather than falling back to the bare exit code. The human default is unchanged.
+    """
+
+    def test_violations_emit_gate_verdict_json(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(JSON_ENV_VAR, "1")
+        make_mirror(tmp_path, "data/intro.md", b"drifted\n")
+        write_mirrors(tmp_path, row("data/intro.md", sha256_of(b"original\n")))
+        code = main(["--repo", str(tmp_path)])
+        report = json.loads(capsys.readouterr().out)
+        assert code == 1
+        assert report["gate"] == "cf-mirror-check"
+        assert report["passed"] is False
+        assert report["exit_code"] == 1
+        assert report["error"] is None
+        assert report["violations"][0]["code"] == "MIRROR_DIVERGED"
+        assert report["violations"][0]["path"] == "data/intro.md"
+
+    def test_clean_emits_passing_verdict_json(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(JSON_ENV_VAR, "1")
+        digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
+        write_mirrors(tmp_path, row("data/intro.md", digest))
+        code = main(["--repo", str(tmp_path)])
+        report = json.loads(capsys.readouterr().out)
+        assert code == 0
+        assert report["gate"] == "cf-mirror-check"
+        assert report["passed"] is True
+        assert report["violations"] == []
+
+    def test_gate_error_emits_verdict_json_on_stderr(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(JSON_ENV_VAR, "1")
+        code = main(["--repo", str(tmp_path)])  # no MIRRORS.md: the gate cannot run
+        captured = capsys.readouterr()
+        assert code == 2
+        assert captured.out == ""  # the wire form for a gate error lands on stderr
+        report = json.loads(captured.err)
+        assert report["exit_code"] == 2
+        assert report["error"]["code"] == "MIRRORS_FILE_MISSING"

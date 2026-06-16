@@ -40,12 +40,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
-import json
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from cf_quality.errors import GateError, GateViolation
+from cf_quality.reporting import print_verdict
 
 DEFAULT_MAX_PIN_AGE_DAYS = 90
 
@@ -348,11 +347,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         violations = check_mirrors(repo, max_pin_age_days=args.max_pin_age_days)
     except GateError as error:
-        print(json.dumps(error.to_dict()), file=sys.stderr)
-        return 2
-    for violation in violations:
-        print(json.dumps(violation.to_dict()))
-    return 1 if violations else 0
+        return print_verdict("cf-mirror-check", [], error)
+    return print_verdict(
+        "cf-mirror-check",
+        violations,
+        clean_summary="cf-mirror-check: OK",
+        fail_summary=f"cf-mirror-check: FAIL ({len(violations)} violation(s))",
+    )
 
 
 if __name__ == "__main__":
