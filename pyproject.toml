@@ -39,6 +39,7 @@ cf-recursion-check = "cf_quality.recursion_check:main"
 cf-exemptions = "cf_quality.exemptions:main"
 cf-repo-config = "cf_quality.repo_config:main"
 cf-import-contract = "cf_quality.import_contract:main"
+cf-gate = "cf_quality.gate_runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -47,7 +48,11 @@ where = ["src"]
 # The canonical sticky block (and its declared-mirror provenance note) ship
 # INSIDE the wheel — cf-sticky-check loads them via importlib.resources, so a
 # non-editable install (CI's exact mode) carries its own gauge data.
-cf_quality = ["data/*.md"]
+# _configs/*.toml are the shared ruff/mypy gauges shipped the same way, so
+# cf-gate resolves them from the INSTALLED package (not a source-tree path);
+# they are declared mirrors of configs/*-base.toml (byte/value parity guarded
+# by the kit's own test battery — the kit submits to the gauge it ships).
+cf_quality = ["data/*.md", "_configs/*.toml"]
 
 [tool.importlinter]
 # The kit's OWN import contract — the gauge submits to the gate it ships
@@ -64,7 +69,7 @@ name = "the gates sit above repo_config above errors"
 type = "layers"
 containers = ["cf_quality"]
 layers = [
-    "exemptions | file_budget | import_contract | mirror_check | recursion_check | sticky_check",
+    "exemptions | file_budget | gate_runner | import_contract | mirror_check | recursion_check | sticky_check",
     "repo_config",
     "errors",
 ]

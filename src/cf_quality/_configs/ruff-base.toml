@@ -1,0 +1,62 @@
+# candyfactory-quality · ruff-base.toml — the shared ruff gauge (ruff.toml format).
+# vendored per consumer repo; drift caught by ruff-sync check;
+# [tool.ruff-sync].exclude allowlist: lint.per-file-ignores ONLY
+# (any other excluded dotted path — e.g. lint.ignore — is the refuter's unbounded
+# escape hatch and fails the sync audit).
+#
+# Budgets are the ratified BubbleGum numbers (canon ADR 0029), anchored to
+# measurement, tunable without reopening the ADR:
+#   C901 cyclomatic complexity <= 10 · PLR0915 <= 50 statements/function
+#   line-length 100 · target py312
+# Consumer mounts: copy this file to <repo>/ruff.toml (or `extend` it) and add
+# a ruff-sync stanza pointing back at this kit's pinned SHA.
+#
+# known-first-party (isort) is deliberately NOT set here: a shared gauge file
+# cannot name every consumer's packages, and ruff's on-disk detection mis-files
+# first-party imports that do not resolve on disk (modules authored RED, tests
+# addressed by package path) — measured on a consumer where fixing the kit's
+# I001 created NEW legacy-isort I001. The gate DERIVES the names per consumer
+# (`cf-repo-config first-party`, from the resolved source root) and passes them
+# inline: `--config "lint.isort.known-first-party=[...]"`. A vendored local
+# copy MAY add [lint.isort] known-first-party with the repo's own names for
+# editor/pre-commit parity — like per-file-ignores, it cannot weaken the graded
+# verdict (CI derives its own value from committed state).
+
+line-length = 100
+target-version = "py312"
+
+[lint]
+# E/F/I/UP/B = correctness + imports + modernity battery.
+# C901 = cyclomatic budget · PLR0915 = statement budget (the form gates).
+# S = bandit security battery · BLE = blind-except ban (the Elegance Law's
+# "no swallowed exceptions" enforced at lint altitude).
+# PGH004 = blanket (codeless) noqa fails · RUF100 = unused noqa fails — the
+# refuter showed a bare `# noqa` suppressed C901 with no lint backstop;
+# blanket suppression now fails here AND in cf-exemptions (BARE_NOQA).
+select = ["E", "F", "I", "UP", "B", "C901", "PLR0915", "S", "BLE", "PGH004", "RUF100"]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-statements = 50
+
+[lint.per-file-ignores]
+# tests-context battery, measured estate-wide 2026-06-10; src keeps the full battery:
+#   S101 pytest's assert is the test idiom, not a security hole ·
+#   S105/S106 fake credentials in fixtures · S603/S607 subprocess runs of the
+#   repo's own CLI · S608 fixture SQL strings · B017 broad pytest.raises.
+# Test code legitimately does these things; FP noise trains agents to ignore
+# the gate (refuter doctrine), so the tests context carves them out EXACTLY.
+# This table is the ONLY section a consumer may locally extend (and the only
+# dotted path allowed in [tool.ruff-sync].exclude) — every added ignore must
+# trace to a reasoned entry in the repo's exemptions.json (cf-exemptions).
+# Glob set covers test trees for real, by measurement: 'tests/*' alone missed
+# nested layouts (a monorepo's server/tests drew 845 false S101 in the mount
+# wave); the '**' forms cover any depth on both sides; '**/conftest.py'
+# catches fixture roots wherever they live.
+"tests/*" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/tests/*" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
+"**/conftest.py" = ["S101", "S105", "S106", "S603", "S607", "S608", "B017"]
