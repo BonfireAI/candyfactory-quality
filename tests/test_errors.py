@@ -7,7 +7,7 @@ context, explicit retryability — never a bare exception or a magic return.
 
 import pytest
 
-from cf_quality.errors import GateError, GateViolation
+from cf_quality.errors import GateError, GateVerdict, GateViolation
 
 
 class TestGateError:
@@ -80,9 +80,74 @@ class TestGateViolation:
             "path": "p.py",
             "line": 3,
             "context": {"a": 1},
+            "severity": "error",
+            "fixable": False,
         }
 
     def test_is_frozen_value_object(self) -> None:
         v = GateViolation(code="C", message="m", path="p.py")
         with pytest.raises(AttributeError):
             v.code = "OTHER"  # type: ignore[misc]
+
+    def test_severity_and_fixable_default_back_compatibly(self) -> None:
+        # The two new fields carry defaults, so old construction is untouched.
+        v = GateViolation(code="C", message="m", path="p.py")
+        assert v.severity == "error"
+        assert v.fixable is False
+
+    def test_positional_construction_unbroken_by_new_fields(self) -> None:
+        # The original five fields keep their positions; the additions are last.
+        v = GateViolation("C", "m", "p.py", 7, {"k": "v"})
+        assert (v.code, v.message, v.path, v.line, v.context) == ("C", "m", "p.py", 7, {"k": "v"})
+        assert v.severity == "error"
+        assert v.fixable is False
+
+    def test_new_fields_are_declarable(self) -> None:
+        v = GateViolation(code="C", message="m", path="p.py", severity="warning", fixable=True)
+        assert v.severity == "warning"
+        assert v.fixable is True
+        assert v.to_dict()["severity"] == "warning"
+        assert v.to_dict()["fixable"] is True
+
+
+class TestGateVerdict:
+    def test_clean_verdict_passed_and_exit_zero(self) -> None:
+        verdict = GateVerdict(gate="cf-x", violations=[])
+        assert verdict.passed is True
+        assert verdict.exit_code == 0
+
+    def test_violations_fail_with_exit_one(self) -> None:
+        verdict = GateVerdict(
+            gate="cf-x",
+            violations=[GateViolation(code="C", message="m", path="p.py")],
+        )
+        assert verdict.passed is False
+        assert verdict.exit_code == 1
+
+    def test_error_dominates_with_exit_two(self) -> None:
+        # A gate error outranks any findings: the gate could not run.
+        verdict = GateVerdict(
+            gate="cf-x",
+            violations=[GateViolation(code="C", message="m", path="p.py")],
+            error=GateError(code="GATE_X", message="boom"),
+        )
+        assert verdict.passed is False
+        assert verdict.exit_code == 2
+
+    def test_to_dict_composes_the_part_wire_forms(self) -> None:
+        violation = GateViolation(code="C", message="m", path="p.py", line=2)
+        error = GateError(code="GATE_X", message="boom", context={"k": "v"})
+        verdict = GateVerdict(gate="cf-x", violations=[violation], error=error)
+        assert verdict.to_dict() == {
+            "gate": "cf-x",
+            "passed": False,
+            "exit_code": 2,
+            "error": error.to_dict(),
+            "violations": [violation.to_dict()],
+        }
+
+    def test_clean_to_dict_has_null_error_and_stable_keys(self) -> None:
+        verdict = GateVerdict(gate="cf-x", violations=[])
+        report = verdict.to_dict()
+        assert report["error"] is None
+        assert set(report) == {"gate", "passed", "exit_code", "error", "violations"}

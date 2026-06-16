@@ -55,6 +55,7 @@ from pathlib import Path
 
 from cf_quality.errors import GateError, GateViolation
 from cf_quality.repo_config import resolve_source_root
+from cf_quality.reporting import print_verdict
 
 BASELINE_FILENAME = "import-contract-baseline.json"
 _PINNED_ALERTING = "error"
@@ -314,46 +315,59 @@ def _edge_lines(output: str) -> list[str]:
     return [line.strip() for line in output.splitlines() if "->" in line]
 
 
-def _report_pass_two(exit_code: int, output: str) -> int:
-    """Classify the observed lint-imports verdict; config trouble raises typed."""
+def _pass_two_violations(exit_code: int, output: str) -> list[GateViolation]:
+    """PASS 2 as typed findings — never parsed bare strings.
+
+    A clean run yields nothing; a broken contract or a stale ignore becomes
+    one CONTRACT_BROKEN / CONTRACT_STALE_IGNORE per reported edge (the
+    lint-imports edge text rides in the message and context). A failure with
+    no contract verdict at all is environment/config trouble — a typed
+    CONTRACT_CONFIG_ERROR (exit 2), never a violation verdict.
+    """
     if exit_code == 0:
-        return 0
+        return []
     if _STALE_IGNORE_MARKER in output:
-        print(
-            "CONTRACT_STALE_IGNORE: ignore_imports entries match no real edge — "
-            "remove them; the baseline self-cleans"
+        return _edge_violations(
+            "CONTRACT_STALE_IGNORE",
+            "ignore_imports entries match no real edge — remove them; the baseline self-cleans",
+            output,
         )
-    elif "BROKEN" in output:
-        print("CONTRACT_BROKEN: lint-imports reports the committed contract violated")
-    else:
-        raise _config_error(
-            "lint-imports failed without a contract verdict (environment/config "
-            "trouble, e.g. an uninstalled src-layout package)",
-            {"exit_code": exit_code, "output_tail": output.strip().splitlines()[-3:]},
+    if "BROKEN" in output:
+        return _edge_violations(
+            "CONTRACT_BROKEN",
+            "lint-imports reports the committed contract violated",
+            output,
         )
-    for line in _edge_lines(output):
-        print(line)
-    return 1
+    raise _config_error(
+        "lint-imports failed without a contract verdict (environment/config "
+        "trouble, e.g. an uninstalled src-layout package)",
+        {"exit_code": exit_code, "output_tail": output.strip().splitlines()[-3:]},
+    )
+
+
+def _edge_violations(code: str, summary: str, output: str) -> list[GateViolation]:
+    """One finding per reported edge; a verdict with no edge still reports once."""
+    edges = _edge_lines(output)
+    if not edges:
+        return [_contract_violation(code, summary, {"output": output.strip()})]
+    return [_contract_violation(code, f"{summary}: {edge}", {"edge": edge}) for edge in edges]
 
 
 def _missing_contract_verdict(root: Path) -> int:
     packages = _top_level_packages(resolve_source_root(root))
     if not packages:
-        print("cf-import-contract: OK (no top-level packages, no contract required)")
-        return 0
-    print(
-        f"CONTRACT_MISSING: top-level package(s) {', '.join(packages)} carry no "
-        "committed import contract ([tool.importlinter] in pyproject.toml)"
-    )
-    return 1
-
-
-def _print_violations(violations: list[GateViolation]) -> None:
-    for violation in violations:
-        location = (
-            f"{violation.path}:{violation.line}" if violation.line is not None else violation.path
+        return print_verdict(
+            "cf-import-contract",
+            [],
+            clean_summary="cf-import-contract: OK (no top-level packages, no contract required)",
         )
-        print(f"{location}: {violation.code}: {violation.message}")
+    violation = _contract_violation(
+        "CONTRACT_MISSING",
+        f"top-level package(s) {', '.join(packages)} carry no committed import "
+        "contract ([tool.importlinter] in pyproject.toml)",
+        {"packages": packages},
+    )
+    return print_verdict("cf-import-contract", [violation])
 
 
 def _run_gate(root: Path) -> int:
@@ -362,22 +376,24 @@ def _run_gate(root: Path) -> int:
         return _missing_contract_verdict(root)
     lint_violations = lint_contract(root)
     if lint_violations:
-        _print_violations(lint_violations)
-        return 1
+        return print_verdict("cf-import-contract", lint_violations)
     exit_code, output = _run_lint_imports(root)
-    if _report_pass_two(exit_code, output) != 0:
-        return 1
-    for entry in _ignore_entries(_contracts(table)):
-        print(f"ignored edge honored (enumerated, baseline-counted): {entry}")
-    dynamic_violations = scan_dynamic_imports(root)
-    if dynamic_violations:
-        _print_violations(dynamic_violations)
-        return 1
-    print(
-        "cf-import-contract: OK (contract linted, lint-imports kept, no module-level "
-        "dynamic imports)"
+    pass_two = _pass_two_violations(exit_code, output)
+    if pass_two:
+        return print_verdict("cf-import-contract", pass_two)
+    notices = [
+        f"ignored edge honored (enumerated, baseline-counted): {entry}"
+        for entry in _ignore_entries(_contracts(table))
+    ]
+    return print_verdict(
+        "cf-import-contract",
+        scan_dynamic_imports(root),
+        notices=notices,
+        clean_summary=(
+            "cf-import-contract: OK (contract linted, lint-imports kept, no module-level "
+            "dynamic imports)"
+        ),
     )
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -391,8 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _run_gate(Path(args.root).resolve())
     except GateError as exc:
-        print(json.dumps(exc.to_dict(), ensure_ascii=False), file=sys.stderr)
-        return 2
+        return print_verdict("cf-import-contract", [], exc)
 
 
 if __name__ == "__main__":
