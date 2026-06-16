@@ -11,10 +11,15 @@ their control rods.
 2. **Node-24 action pins** — GitHub forces Node 24 from 2026-06-16; the
    deprecated Node-20 SHAs are denylisted (ratchet: forward bumps free,
    rollback refused).
-3. **complexipy joins the gate** — the watermark was runbook-only; now a
-   workflow step with the mypy-style presence rule.
+3. **complexipy joins the gate** — the watermark was runbook-only; the
+   mypy-style presence rule now rides cf-gate's complexipy stage (pinned in
+   test_gate_runner.py). The only residue at THIS altitude is the workflow
+   fact that the kit COMMITS its own snapshot so self-ci's cf-gate exercises
+   the ratchet rather than refusing.
 4. **first-party isort alignment** — the gate derives known-first-party from
-   the consumer's resolved source root and feeds it to the pinned ruff gauge.
+   the consumer's resolved source root and feeds it to the pinned ruff gauge;
+   that derivation + wiring moved into gate_runner (pinned in
+   test_gate_runner.py) when the discrete steps collapsed into cf-gate.
 """
 
 from __future__ import annotations
@@ -208,49 +213,32 @@ def test_workflows_carry_no_deprecated_node20_action_pins() -> None:
 
 
 # --- complexipy joins the gate (the watermark was runbook-only) -----------------
+#
+# The per-step complexipy BEHAVIORS — refuse a Python repo with no snapshot,
+# skip a Python-free repo visibly, target the resolved source_root unpiped —
+# moved into cf-gate's complexipy stage when the ~11 fail-fast steps collapsed
+# into the one aggregating step; they are now pinned at the gate_runner altitude
+# (tests/test_gate_runner.py::test_complexipy_*). The same collapse moved the
+# first-party isort derivation + ruff wiring into gate_runner (pinned there as
+# test_layout_first_party_*/test_ruff_check_rides_layout_first_party). What
+# remains a genuine WORKFLOW-level property is only the snapshot ratchet's
+# self-ci residue, below.
 
 
-def test_gate_complexipy_refuses_python_repo_without_snapshot() -> None:
-    # Same doctrine as the mypy baseline: green-by-file-absence is opt-in
-    # gaming. A Python repo must carry its snapshot; only a Python-free repo
-    # may skip, visibly.
-    script = _run_script(_load(GATE_PATH), "gate")
-    part = script[script.find("complexipy-snapshot.json") :]
-    assert "::error::" in part, "a Python repo without a snapshot must fail loudly"
-    assert "exit 1" in part
-    assert "::notice::" in part, "the Python-free skip stays visible"
-
-
-def test_gate_complexipy_targets_resolved_source_root_unpiped() -> None:
-    steps = _steps(_load(GATE_PATH), "gate")
-    complexipy_steps = [s for s in steps if "complexipy" in s.get("name", "")]
-    assert len(complexipy_steps) == 1
-    run = complexipy_steps[0]["run"]
-    assert 'complexipy "$CF_SOURCE_ROOT"' in run
-    for line in run.splitlines():
-        if "complexipy" in line and "snapshot" not in line:
-            assert "|" not in line, "piping complexipy masks its exit code (tool spike)"
-
-
-def test_self_ci_runs_complexipy_against_committed_snapshot() -> None:
-    script = _run_script(_load(SELF_CI_PATH), "gate")
-    assert "complexipy src" in script, "the kit ratchets FIRST — its own watermark is gated"
+def test_self_ci_exercises_the_snapshot_ratchet_via_committed_watermark() -> None:
+    # self-ci no longer runs `complexipy` as a discrete step — it runs cf-gate
+    # (test_workflows::test_self_ci_gates_through_cf_gate_directly), whose
+    # complexipy stage REFUSES a Python repo carrying no snapshot. So the kit
+    # only exercises its OWN ratchet if it COMMITS the watermark: the snapshot
+    # is kept on disk, while the zero mypy baseline is synthesized in-job (the
+    # kit adopts at baseline zero). That asymmetry is the new shape's contract.
     assert (REPO / "complexipy-snapshot.json").is_file(), (
-        "the kit's own complexipy snapshot must be committed (boot per BASELINE-CONVENTIONS)"
+        "the kit's own complexipy snapshot must be committed (boot per "
+        "BASELINE-CONVENTIONS) — cf-gate's complexipy stage would otherwise "
+        "refuse the kit's Python source and self-ci could never go green"
     )
-
-
-# --- first-party isort alignment (the I001 cross-config conflict) ---------------
-
-
-def test_gate_resolves_first_party_names_for_the_ruff_gauge() -> None:
-    script = _run_script(_load(GATE_PATH), "gate")
-    assert "cf-repo-config first-party" in script, "the gate derives first-party names"
-    assert "CF_FIRST_PARTY" in script
-
-
-def test_gate_ruff_check_rides_derived_known_first_party() -> None:
-    steps = _steps(_load(GATE_PATH), "gate")
-    check_steps = [s for s in steps if s.get("run", "").startswith("ruff check")]
-    assert len(check_steps) == 1
-    assert "lint.isort.known-first-party=$CF_FIRST_PARTY" in check_steps[0]["run"]
+    script = _run_script(_load(SELF_CI_PATH), "gate")
+    assert "mypy-baseline.txt" in script, "self-ci synthesizes the kit's zero mypy baseline"
+    assert "complexipy" not in script, (
+        "complexipy is no longer a discrete self-ci step — it runs inside cf-gate"
+    )

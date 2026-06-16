@@ -123,23 +123,19 @@ jobs:
         # block; the consumer never supplies its own copies of the gate tools.
         run: pip install "$GITHUB_WORKSPACE/.cf-quality[dev]"
 
-      - name: Resolve the consumer's declared layout (cf-repo-config)
+      - name: Resolve the consumer's declared package dir (cf-repo-config)
         # The zero-inputs doctrine stays intact: layout comes from COMMITTED
         # consumer state ([tool.cf-quality] in pyproject.toml or in
-        # .cf-quality.toml), never from a caller knob. A declared source_root
-        # that is missing, escapes the repo, or holds zero .py files FAILS
-        # typed (GATE_CONFIG_INVALID) before anything is graded — pointing
-        # the gauge at an empty room is a violation, not a pass (DESIGN.md
-        # "Declared source roots"). Absent declaration keeps the historical
-        # discovery exactly (src/ when present, else the repo root).
+        # .cf-quality.toml), never from a caller knob. cf-gate (below)
+        # self-resolves the FULL layout — declared source root, first-party
+        # names — internally; the workflow needs only the package dir here, to
+        # install the consumer package BEFORE the gate so pytest/mypy can
+        # import it. An invalid declaration still fails typed (cf-repo-config)
+        # before anything is graded against the wrong tree.
         run: |
-          CF_SOURCE_ROOT="$(cf-repo-config source-root)"
           CF_PACKAGE_DIR="$(cf-repo-config package-dir)"
-          CF_FIRST_PARTY="$(cf-repo-config first-party)"
-          echo "CF_SOURCE_ROOT=$CF_SOURCE_ROOT" >> "$GITHUB_ENV"
           echo "CF_PACKAGE_DIR=$CF_PACKAGE_DIR" >> "$GITHUB_ENV"
-          echo "CF_FIRST_PARTY=$CF_FIRST_PARTY" >> "$GITHUB_ENV"
-          echo "resolved source root: $CF_SOURCE_ROOT / package dir: $CF_PACKAGE_DIR / first-party: $CF_FIRST_PARTY"
+          echo "resolved package dir: $CF_PACKAGE_DIR"
 
       - name: Install the consumer package
         # Monorepo layouts (declared package_dir) install from the package's
@@ -159,109 +155,40 @@ jobs:
 
       - name: Assert the vendored ruff gauge is present
         # Local-dev hygiene only: the consumer's vendored copy serves editors
-        # and pre-commit runs. The GATED verdict below rides the KIT's pinned
-        # gauge directly — the refuter showed a hollowed vendored copy passed
-        # this presence-only assert while neutering the battery, so presence
-        # is asserted but fidelity is no longer trusted.
+        # and pre-commit runs. The GATED verdict (cf-gate, below) rides the
+        # KIT's pinned gauge directly — the refuter showed a hollowed vendored
+        # copy passed this presence-only assert while neutering the battery, so
+        # presence is asserted but fidelity is no longer trusted.
         run: |
           if [ ! -f ruff.toml ] && [ ! -f .ruff.toml ] && ! grep -q '^\[tool\.ruff' pyproject.toml 2>/dev/null; then
             echo "::error::no vendored ruff gauge found (ruff.toml / .ruff.toml / [tool.ruff]) — vendor configs/ruff-base.toml per the kit README"
             exit 1
           fi
 
-      - name: ruff check (the kit's pinned gauge, never the consumer copy)
-        # Same doctrine as mypy below: the config the verdict is graded by
-        # comes from the kit checkout at the pinned SHA, so a consumer cannot
-        # weaken the gauge it is graded by (hollow-vendored-copy refusal).
-        # known-first-party is DERIVED from the consumer's resolved source
-        # root (cf-repo-config first-party): a shared gauge file cannot name
-        # every consumer's packages, and ruff's on-disk detection mis-files
-        # first-party imports that do not resolve — the kit's I001 verdict
-        # then contradicts the repo's legacy isort config. The inline value
-        # is derived from committed state, never a caller knob.
-        run: ruff check . --config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml" --config "lint.isort.known-first-party=$CF_FIRST_PARTY"
-
-      - name: ruff format --check (the kit's pinned gauge)
-        run: ruff format --check . --config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"
-
-      - name: cf-sticky-check — the sticky intro is mounted, byte-faithful
-        run: cf-sticky-check check .
-
-      - name: cf-file-budget — new files ≤ 500 lines, baseline shrink-only
-        run: cf-file-budget check
-
-      - name: cf-mirror-check — declared mirrors only (skip-if-no-MIRRORS.md)
+      - name: cf-gate — run the whole battery, aggregate, report every red gate
+        # THE gate: ONE COMPLETE step. cf-gate runs EVERY stage (ruff,
+        # ruff-format, the cf-* gates, mypy through the baseline ratchet,
+        # complexipy through the snapshot ratchet, pytest), collecting one
+        # verdict each, and exits on the WORST (2 setup-error · 1 violations ·
+        # 0 clean). It replaces the old ~11 fail-fast steps, so a red run shows
+        # the WHOLE board — not just the first failure — which is the COMPLETE
+        # property at the CI layer. NO continue-on-error: the step's own
+        # nonzero exit fails the job (the aggregating step IS the mechanism;
+        # rescuing it would re-neuter the gate). cf-gate self-resolves the
+        # declared layout (cf-repo-config) and loads its gauge configs from the
+        # installed kit, so no CF_SOURCE_ROOT/CF_FIRST_PARTY env is threaded
+        # here. The human board is teed verbatim into the run log AND
+        # $GITHUB_STEP_SUMMARY (fenced) so the aggregated failing-gate board is
+        # the run's summary; any ::error:: lines cf-gate emits pass through
+        # untouched (the run stays faithful — nothing is suppressed).
         run: |
-          if [ -f MIRRORS.md ]; then
-            cf-mirror-check check --repo .
-          else
-            echo "::notice::cf-mirror-check SKIPPED — no MIRRORS.md in this repo; if it carries cross-repo copies, declare them (cf-mirror-check init)"
-          fi
-
-      - name: cf-recursion-check — recursion declared with a stated bound
-        run: cf-recursion-check .
-
-      - name: cf-exemptions — every suppression traces to a reasoned entry
-        run: cf-exemptions
-
-      - name: cf-import-contract — the committed layering contract holds
-        # Same command shape as self-ci. The consumer's ONE committed import
-        # contract ([tool.importlinter] in pyproject.toml) is held in three
-        # passes; a repo with no committed contract fails CONTRACT_MISSING —
-        # the contract must be merged BEFORE the consumer's pin reaches this
-        # commit. Exit 2 is the gate itself failing to run (typed GateError
-        # on stderr — environment trouble is never a violation verdict).
-        run: cf-import-contract --root .
-
-      - name: mypy through the baseline ratchet (a Python repo MUST carry a baseline)
-        # The pipe is the design: mypy exits nonzero whenever baselined debt
-        # exists; mypy-baseline filter is the gate (0 new errors), so the step
-        # gates on the LAST command — deliberately no pipefail here.
-        # The refuter showed "0 new type errors" was opt-in by file presence:
-        # no mypy-baseline.txt meant NO type checking and a green gate. Now a
-        # repo containing Python REFUSES to pass without a baseline (boot one
-        # even at zero errors); only a Python-free repo may skip, visibly.
-        # The measured target is CF_SOURCE_ROOT (cf-repo-config): the declared
-        # source_root for monorepo layouts — the mount wave proved the old
-        # root-level `src` discovery graded a VACUOUS tree there — else the
-        # same src/root discovery as before, so a flat layout still cannot
-        # escape via a hardcoded `src`. mypy-baseline.txt stays root-anchored.
-        run: |
-          if [ -f mypy-baseline.txt ]; then
-            mypy "$CF_SOURCE_ROOT" --config-file "$GITHUB_WORKSPACE/.cf-quality/configs/mypy-base.toml" | mypy-baseline filter
-          elif find . -name '*.py' -not -path '*/.*' | grep -q .; then
-            echo "::error::mypy ratchet REFUSED — Python files present but no mypy-baseline.txt; boot the baseline per configs/BASELINE-CONVENTIONS.md (mypy src | mypy-baseline sync), even at zero errors"
-            exit 1
-          else
-            echo "::notice::mypy ratchet SKIPPED — no Python files in this repo"
-          fi
-
-      - name: complexipy through the snapshot ratchet (a Python repo MUST carry the watermark)
-        # Cognitive complexity rides the committed complexipy-snapshot.json
-        # watermark: a plain run compares against the snapshot in CWD — no
-        # separate ratchet flag exists in 5.5.0; comparison is the default
-        # (docs/tool-spikes.md). NEVER piped: piping masks the exit code.
-        # Same presence doctrine as the mypy baseline: the conventions define
-        # this as a gate, and green-by-missing-file is opt-in gaming — a repo
-        # with Python REFUSES to pass without its snapshot; only a
-        # Python-free repo may skip, visibly. The snapshot does NOT
-        # auto-shrink: re-snapshot on merge stays the runbook's job.
-        run: |
-          if [ -f complexipy-snapshot.json ]; then
-            complexipy "$CF_SOURCE_ROOT"
-          elif find . -name '*.py' -not -path '*/.*' | grep -q .; then
-            echo "::error::complexipy ratchet REFUSED — Python files present but no complexipy-snapshot.json; boot the snapshot per configs/BASELINE-CONVENTIONS.md (complexipy <source-root> --snapshot-create from the repo root), even when clean"
-            exit 1
-          else
-            echo "::notice::complexipy ratchet SKIPPED — no Python files in this repo"
-          fi
-
-      - name: pytest
-        # Plain pytest: a repo with zero collected tests exits 5 and FAILS the
-        # floor on purpose — a floor without tests is prose, not a gate. Runs
-        # in the declared package dir (a monorepo's pytest config + importable
-        # package live there; from the umbrella root the suite collected
-        # un-importable tests) — the repo root when nothing is declared.
-        run: |
-          cd "$CF_PACKAGE_DIR"
-          pytest
+          set +e
+          {
+            echo "### cf-gate — aggregated quality verdict"
+            echo ""
+            echo '```text'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cf-gate | tee -a "$GITHUB_STEP_SUMMARY"
+          status="${PIPESTATUS[0]}"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
