@@ -69,10 +69,29 @@ complexipy src             # cognitive-complexity snapshot (second metric)
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/cf-gate                  # THE local gate — the exact battery CI runs
+```
+
+`cf-gate` is the single command that mirrors CI: it is the same console script
+the workflow invokes (`.github/workflows/quality-gate.yml` and `self-ci.yml`
+each run one `cf-gate` step), so a green `cf-gate` locally means a green gate in
+CI — same gauge, same configs, same verdict. It runs **every** gate stage (ruff
+check, ruff format, the `cf-*` gates, mypy through the baseline ratchet,
+complexipy through the snapshot ratchet, pytest), collecting one verdict each
+and **aggregating** them: it does not stop at the first red, so a single run
+reports the whole board of failures, then exits on the worst verdict
+(`2` setup error · `1` violations · `0` clean). It self-resolves the declared
+layout and loads its gauge configs from the installed kit — no flags to thread.
+
+The individual tools still work for focused, single-gate runs while iterating:
+
+```bash
 .venv/bin/pytest
 .venv/bin/ruff check .
 .venv/bin/mypy src
 ```
 
-Tool-behavior spikes (complexipy snapshot semantics, mypy-baseline set-difference)
-are documented in `docs/tool-spikes.md`.
+But `cf-gate` is the canonical local gate — only it reproduces CI exactly
+(every stage, the same aggregated verdict). Tool-behavior spikes (complexipy
+snapshot semantics, mypy-baseline set-difference) are documented in
+`docs/tool-spikes.md`.
