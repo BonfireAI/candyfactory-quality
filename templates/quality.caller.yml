@@ -8,8 +8,11 @@
 #     rejects any `with:` block at call time
 #   - the `uses:` ref is a FULL 40-hex commit SHA; Dependabot bumps it
 #     (docs/sha-pin-doctrine.md) — never @main, never a tag
-#   - mount this workflow as a REQUIRED status check in the repo's branch
-#     protection/ruleset, or the gate runs red and merges land anyway
+#   - mount this workflow as a REQUIRED status check (non-bypassable: enforce_admins
+#     on) in the repo's branch protection/ruleset, or the gate runs red and merges land
+#     anyway. The status-check context is `gate / gate` (caller job `gate` over
+#     the reusable workflow's `gate` job). Procedure + canary audit:
+#     docs/enforcement-runbook.md (also templates/check-required-mount.sh)
 name: quality-gate
 on:
   push:

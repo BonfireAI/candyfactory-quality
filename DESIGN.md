@@ -368,6 +368,21 @@ weekly ruleset sweep, and the pre-registered mount canary (deliberately
 failing commit → assert red AND unmergeable → record the run URL) — all
 procedure in v0, not mechanism.
 
+*The ENFORCED leg (per-consumer).* Required + non-bypassable enforcement is the
+one leg that, left undone, lets the gate run red while merges land — the
+documented root cause of a sister repo merging red five times. It is enforced
+**per consumer**: branch protection lives in the consumer repo, outside this
+kit, so the kit cannot assert it — it makes it ACTIONABLE and AUDITABLE.
+`docs/enforcement-runbook.md` is the observed, repeatable procedure to mount
+`quality-gate` as a REQUIRED (`required_status_checks.contexts: ["gate / gate"]`),
+non-bypassable (`enforce_admins: true`) check — including the API trap (a PATCH
+404s on a branch with no required checks; the first mount needs the full
+protection `PUT`, which replaces all protection, so every current field must be
+reproduced). `templates/check-required-mount.sh` is the canary: it reports, for
+any `OWNER/REPO/branch`, whether `gate / gate` is required and whether
+enforcement is non-bypassable — a PASS/FAIL line for the mount step and the
+Constable sweep.
+
 **Verdict:** PARTIAL. Event-type neutering and skip inputs are mechanically
 refused; paths filters, caller-side `continue-on-error`, and
 required-check enforcement remain procedural (Constable + mount canary).
@@ -547,7 +562,8 @@ Everything below is a known gap, on the record. Ordered by blood.
 8. **ruff-sync check (§4.9)** — not installed, not a step; vendored-gauge
    content fidelity is unforced unless the consumer mirror-declares it.
 9. **Required-status-check mounting + canary (§4.8)** — rulesets and the
-   failing mount canary are procedure (runbook + Constable), not mechanism;
+   failing mount canary are procedure (`docs/enforcement-runbook.md` +
+   `templates/check-required-mount.sh` + Constable), not mechanism;
    caller-side `paths:` filters and `continue-on-error` stay invisible.
 10. **Undeclared mirrors (§4.12)** — the gate verifies only DECLARED rows;
     a repo holding real cross-repo copies that simply never lists them is
