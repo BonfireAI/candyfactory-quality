@@ -59,6 +59,26 @@ two-profile clone carve-out, see §7). Tool-behavior ground truth lives in
 `docs/tool-spikes.md` — complexipy 5.5.0 and mypy-baseline 0.7.4 semantics
 were observed on fixtures, not read off READMEs.
 
+**The single reproducible entrypoint — `cf-gate` (`gate_runner.py`).** The
+battery above is split across many console scripts and external tools so each
+gate can mount alone; that fidelity costs the developer the two properties a
+gate is FOR — COMPLETE (every failure in one run) and REPRODUCIBLE (the local
+command == CI). `cf-gate` restores both: one collect-and-continue runner that
+RUNS every stage (ruff check, ruff format, the `cf-*` gates, mypy through the
+baseline ratchet, complexipy through the snapshot ratchet, pytest), collects one
+typed verdict each, and decides once at the end (exit `2` setup error · `1`
+violations · `0` clean). It is the SAME command both workflows now invoke as
+their one gate step — `.github/workflows/quality-gate.yml` (consumers) and
+`.github/workflows/self-ci.yml` (the kit's own CI) each reduced their old
+fail-fast step ladder to a single `cf-gate` — so **local == CI by
+construction**: the developer running `cf-gate` after `pip install -e '.[dev]'`
+reproduces the exact gate, and a per-step `continue-on-error` ladder (which
+would buy COMPLETE at the cost of a neuterable gate) is never needed. `cf-gate`
+self-resolves the declared layout (`cf-repo-config`) and loads its gauge configs
+from the INSTALLED kit (wheel == editable tree), so the verdict cannot drift on
+a vendored or hollowed local copy. The runbook's manual per-tool commands (§3)
+remain only for first-time baseline creation; `cf-gate` is the day-to-day gate.
+
 ---
 
 ## 2. SHA-pin doctrine
