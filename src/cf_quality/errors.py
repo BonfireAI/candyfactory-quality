@@ -1,6 +1,6 @@
 """Typed failure vocabulary for the gauge kit (the Elegance Law).
 
-Two shapes, one language:
+Three shapes, one language:
 
 - :class:`GateError` — the typed exception a gate *raises* when it cannot do
   its job (missing config, unreadable tree). Carries a stable code, a message,
@@ -9,9 +9,14 @@ Two shapes, one language:
   code under measurement breaks the law. A violation is a finding, not a
   crash: gates collect violations and exit non-zero; they raise GateError
   only when the gate itself cannot run.
+- :class:`GateVerdict` — the aggregate a gate run resolves to: the gate's
+  name, the violations it collected, and the GateError it died on (if any).
+  Its :attr:`~GateVerdict.exit_code` and :attr:`~GateVerdict.passed` derive
+  the kit-wide exit contract (0 clean · 1 violations · 2 the gate could not
+  run) from those parts, so every gate reports one structured verdict.
 
-Both serialize via ``to_dict()`` so the wire form and the in-process form say
-the same thing.
+All three serialize via ``to_dict()`` so the wire form and the in-process
+form say the same thing.
 """
 
 from __future__ import annotations
@@ -65,6 +70,11 @@ class GateViolation:
         path: Repo-relative path of the offending artifact.
         line: 1-based line number when the finding is line-anchored.
         context: Structured measurement detail (e.g. measured value, budget).
+        severity: Finding weight (default ``"error"`` — every finding is a
+            failure unless a gate downgrades it). Appended after the original
+            fields so existing positional/keyword construction is untouched.
+        fixable: Whether a tool could mechanically repair the finding
+            (default ``False``). Appended for the same back-compat reason.
     """
 
     code: str
@@ -72,6 +82,8 @@ class GateViolation:
     path: str
     line: int | None = None
     context: dict[str, Any] = field(default_factory=dict)
+    severity: str = "error"
+    fixable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """The wire form — same vocabulary as the in-process form."""
@@ -81,4 +93,49 @@ class GateViolation:
             "path": self.path,
             "line": self.line,
             "context": self.context,
+            "severity": self.severity,
+            "fixable": self.fixable,
+        }
+
+
+@dataclass(frozen=True)
+class GateVerdict:
+    """The aggregate a single gate run resolves to — one structured verdict.
+
+    Composes the existing primitives rather than restating them: the
+    collected :class:`GateViolation` findings and the :class:`GateError` the
+    gate died on (if any). The exit contract is *derived*, never stored, so
+    it cannot drift from the parts it summarizes.
+
+    Attributes:
+        gate: The gate's stable name (e.g. ``cf-file-budget``).
+        violations: Every finding the gate reported (empty when clean).
+        error: The typed failure the gate raised when it could not run, or
+            None when the gate completed (clean or with findings).
+    """
+
+    gate: str
+    violations: list[GateViolation]
+    error: GateError | None = None
+
+    @property
+    def passed(self) -> bool:
+        """True only when the gate ran and found nothing."""
+        return self.error is None and not self.violations
+
+    @property
+    def exit_code(self) -> int:
+        """The kit-wide exit contract: 0 clean · 1 violations · 2 gate error."""
+        if self.error is not None:
+            return 2
+        return 1 if self.violations else 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """The stable wire form composing the parts' own ``to_dict()``."""
+        return {
+            "gate": self.gate,
+            "passed": self.passed,
+            "exit_code": self.exit_code,
+            "error": self.error.to_dict() if self.error is not None else None,
+            "violations": [violation.to_dict() for violation in self.violations],
         }

@@ -64,6 +64,7 @@ from typing import Any
 
 from cf_quality import repo_config
 from cf_quality.errors import GateError, GateViolation
+from cf_quality.reporting import print_verdict
 
 GATED_NOQA_RULES = frozenset({"C901", "PLR0915"})
 #: Whole rule families that are registry-gated code-by-code: the ruff-ported
@@ -474,18 +475,20 @@ def main(argv: list[str] | None = None) -> int:
         violations, lines = check(root)
         fold_in_lines, fold_in_exit = _run_fold_ins(root)
     except GateError as error:
-        print(json.dumps(error.to_dict()), file=sys.stderr)
-        return 2
-    for line in [*lines, *fold_in_lines]:
+        return print_verdict("cf-exemptions", [], error)
+    notices = [*lines, *fold_in_lines]
+    if violations or fold_in_exit == 0:
+        return print_verdict(
+            "cf-exemptions",
+            violations,
+            notices=notices,
+            clean_summary="cf-exemptions: OK",
+            fail_summary=f"cf-exemptions: FAIL ({len(violations)} violation(s))",
+        )
+    # A fold-in wrapper failed with no gate violation of our own: the wrapper
+    # owns the verdict, and its exit code is outside the gate's 0/1/2 contract,
+    # so it is propagated verbatim rather than folded into a GateVerdict.
+    for line in notices:
         print(line)
-    for violation in violations:
-        location = f"{violation.path}:{violation.line}" if violation.line else violation.path
-        print(f"{location}: {violation.code}: {violation.message}")
-    if violations:
-        print(f"cf-exemptions: FAIL ({len(violations)} violation(s))")
-        return 1
-    if fold_in_exit != 0:
-        print(f"cf-exemptions: FAIL (fold-in exit {fold_in_exit})")
-        return fold_in_exit
-    print("cf-exemptions: OK")
-    return 0
+    print(f"cf-exemptions: FAIL (fold-in exit {fold_in_exit})")
+    return fold_in_exit

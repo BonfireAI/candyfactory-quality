@@ -45,14 +45,13 @@ from __future__ import annotations
 
 import argparse
 import ast
-import json
 import re
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 
 from cf_quality.errors import GateError, GateViolation
 from cf_quality.repo_config import resolve_source_root
+from cf_quality.reporting import print_verdict
 
 _DECLARATION = re.compile(r"#\s*recursion:\s*bounded by\s+\S")
 _DECLARATION_WINDOW = 3
@@ -244,15 +243,13 @@ def main(argv: list[str] | None = None) -> int:
         paths = args.paths or [str(resolve_source_root(Path()))]
         violations = [v for path in paths for v in scan_tree(Path(path))]
     except GateError as exc:
-        print(json.dumps(exc.to_dict()), file=sys.stderr)
-        return 2
-    for violation in violations:
-        print(f"{violation.path}:{violation.line}: {violation.code}: {violation.message}")
-    if violations:
-        print(f"cf-recursion-check: FAIL ({len(violations)} undeclared recursion(s))")
-        return 1
-    print("cf-recursion-check: OK (all self-recursion carries a declared bound)")
-    return 0
+        return print_verdict("cf-recursion-check", [], exc)
+    return print_verdict(
+        "cf-recursion-check",
+        violations,
+        clean_summary="cf-recursion-check: OK (all self-recursion carries a declared bound)",
+        fail_summary=f"cf-recursion-check: FAIL ({len(violations)} undeclared recursion(s))",
+    )
 
 
 if __name__ == "__main__":
