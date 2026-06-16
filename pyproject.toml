@@ -16,7 +16,7 @@ dev = [
     # The gauge battery is pinned EXACTLY (== ) so the verdict is DETERMINISTIC:
     # ruff/mypy/complexipy output is version-sensitive, so a floating tool would
     # let the grade drift under the code. requirements-lock.txt freezes the full
-    # transitive set; CI installs from it. Bump via a Constable cadence (BON-1665).
+    # transitive set; CI installs from it. Pins need a periodic refresh cadence.
     "pytest==9.1.0",
     "ruff==0.15.17",
     "mypy==2.1.0",

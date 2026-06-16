@@ -4,16 +4,16 @@ Real behavior of the two pinned ratchet engines, measured on throwaway fixtures
 in `/tmp` against the kit's venv. Every claim below was observed, not read off a
 README. Versions: **complexipy 5.5.0** · **mypy-baseline 0.7.4** (mypy 1.x).
 
-> **Determinism note (BON-1665, 2026-06-16).** The whole `[dev]` gauge battery is
-> now pinned EXACTLY in `pyproject.toml` (`ruff==0.15.17`, `mypy==2.1.0`,
+> **Determinism note (2026-06-16).** The whole `[dev]` gauge battery is now pinned
+> EXACTLY in `pyproject.toml` (`ruff==0.15.17`, `mypy==2.1.0`,
 > `mypy-baseline==0.7.4`, `complexipy==5.6.0`, `pytest==9.1.0`, `pyyaml`,
 > `types-PyYAML`, `import-linter==2.11`), and `requirements-lock.txt` freezes the
 > full transitive set CI installs from. Rationale: ruff/mypy/complexipy output is
 > version-sensitive, so a floating tool lets the grade drift under the code — the
-> verdict must be a pure function of the code (gate-observability epic BON-1661).
-> `tests/test_pyproject_pins.py` guards the pins + lockfile. **The pins need a
-> bump cadence** (a Constable-driven refresh) or the battery rots; the lock has an
-> owner ritual, not a freeze-and-forget.
+> verdict must be a pure function of the code. `tests/test_pyproject_pins.py`
+> guards the pins + lockfile. **The pins need a bump cadence** (a periodic
+> Constable-driven refresh) or the battery rots; the lock has an owner ritual,
+> not a freeze-and-forget.
 
 ---
 
