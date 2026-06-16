@@ -56,15 +56,14 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import json
 import math
 import re
-import sys
 from importlib import resources
 from pathlib import Path
 
 from cf_quality import repo_config
 from cf_quality.errors import GateError, GateViolation
+from cf_quality.reporting import print_verdict
 
 MIRROR_HEADER = (
     "<!-- declared mirror of candyfactory-canon ADR 0029 + ADR 0030"
@@ -358,11 +357,16 @@ def _resolve_target(raw: str) -> Path:
 
 def _run_check(target: Path) -> int:
     violations = check(target)
-    for violation in violations:
-        print(json.dumps(violation.to_dict(), ensure_ascii=False))
+    notices: list[str] = []
     if not violations and repo_config.load(target.parent).client_repo:
-        print(CLIENT_MEMBRANE_NOTICE)  # the waiver is loud, never silent
-    return 1 if violations else 0
+        notices.append(CLIENT_MEMBRANE_NOTICE)  # the waiver is loud, never silent
+    return print_verdict(
+        "cf-sticky-check",
+        violations,
+        notices=notices,
+        clean_summary="cf-sticky-check: OK",
+        fail_summary=f"cf-sticky-check: FAIL ({len(violations)} violation(s))",
+    )
 
 
 def _run_mount(target: Path) -> int:
@@ -386,8 +390,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _run_check(target) if args.mode == "check" else _run_mount(target)
     except GateError as error:
-        print(json.dumps(error.to_dict(), ensure_ascii=False), file=sys.stderr)
-        return 2
+        return print_verdict("cf-sticky-check", [], error)
 
 
 if __name__ == "__main__":
