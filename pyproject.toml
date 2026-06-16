@@ -13,15 +13,19 @@ authors = [{ name = "CandyFactory" }]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "ruff",
-    "mypy",
-    "mypy-baseline",
-    "complexipy",
+    # The gauge battery is pinned EXACTLY (== ) so the verdict is DETERMINISTIC:
+    # ruff/mypy/complexipy output is version-sensitive, so a floating tool would
+    # let the grade drift under the code. requirements-lock.txt freezes the full
+    # transitive set; CI installs from it. Pins need a periodic refresh cadence.
+    "pytest==9.1.0",
+    "ruff==0.15.17",
+    "mypy==2.1.0",
+    "mypy-baseline==0.7.4",
+    "complexipy==5.6.0",
     # pyyaml: tests/test_workflows.py parses the CI workflow YAML surfaces.
-    "pyyaml",
+    "pyyaml==6.0.3",
     # types-PyYAML: mypy stubs so the test battery type-checks at zero errors.
-    "types-PyYAML",
+    "types-PyYAML==6.0.12.20260518",
     # import-linter: pinned EXACTLY — cf-import-contract's pass 2 parses its
     # observed output; a floating dep would let the oracle drift under the contract.
     "import-linter==2.11",
