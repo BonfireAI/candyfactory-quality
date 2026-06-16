@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from cf_quality.errors import GateError, GateVerdict, GateViolation
+from cf_quality.mypy_normalize import normalize_mypy_stdout
 from cf_quality.repo_config import (
     first_party_packages,
     resolve_package_dir,
@@ -284,13 +285,15 @@ def _mypy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
     No baseline + Python present REFUSES (anti-green-by-missing-file); a
     Python-free repo skips, visibly. The pipe is two captured processes so the
     verdict rides ``mypy-baseline filter``'s exit, never mypy's or a pipefail.
+    mypy's stdout is env-normalized between the two so the verdict tracks code.
     """
     if not (layout.root / "mypy-baseline.txt").is_file():
         return _ratchet_skip_or_refuse(
             layout,
             "GATE_MYPY_BASELINE_MISSING",
             "mypy-baseline.txt",
-            "boot the baseline (mypy <source-root> | mypy-baseline sync), even at zero errors",
+            "boot the baseline (mypy <source-root> | python -m cf_quality.mypy_normalize"
+            " | mypy-baseline sync), even at zero errors",
         )
     with _packaged_config("mypy-base.toml") as cfg:
         mypy_proc = _exec(
@@ -298,9 +301,9 @@ def _mypy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
             layout.root,
             env,
         )
-    filter_proc = _exec(
-        [str(_tool("mypy-baseline")), "filter"], layout.root, env, stdin=mypy_proc.stdout
-    )
+    normalized = normalize_mypy_stdout(mypy_proc.stdout)
+    argv = [str(_tool("mypy-baseline")), "filter"]
+    filter_proc = _exec(argv, layout.root, env, stdin=normalized)
     if filter_proc.returncode == 0:
         return GateVerdict(gate="mypy", violations=[])
     detail = (filter_proc.stdout + filter_proc.stderr).strip()

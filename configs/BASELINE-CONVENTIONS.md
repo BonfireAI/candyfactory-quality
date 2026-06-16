@@ -60,7 +60,7 @@ showed the old presence-conditioned skip made "0 new type errors" opt-in);
 a zero-error repo boots an empty baseline the same way.
 
 ```bash
-mypy src --config-file mypy-base.toml | mypy-baseline sync
+mypy src --config-file mypy-base.toml | python -m cf_quality.mypy_normalize | mypy-baseline sync
 git add mypy-baseline.txt          # commit the frozen debt + a dated shrink ticket
 ```
 
@@ -70,8 +70,33 @@ resurrect or duplicate findings.
 **Gate (every CI run):**
 
 ```bash
-mypy src --config-file mypy-base.toml | mypy-baseline filter
+mypy src --config-file mypy-base.toml | python -m cf_quality.mypy_normalize | mypy-baseline filter
 ```
+
+### `cf_quality.mypy_normalize` — the env-independence filter (the deterministic-verdict fix)
+
+Without it the baseline encodes the **environment**, not the code, and produces
+phantom new/fixed deltas (the bug that cost a sister repo four blind CI rounds).
+`cf-gate` applies the SAME transform in-process between mypy and mypy-baseline;
+the manual boot/gate commands above pipe through `python -m
+cf_quality.mypy_normalize` so a hand-synced baseline matches what the gate
+filters against. It is a pure stdin→stdout text pass that:
+
+- **canonicalizes missing third-party imports.** A missing import reads as
+  `Library stubs not installed for "M"` / `Skipping analyzing "M": …`
+  (`[import-untyped]`) when the package is installed-without-stubs, but
+  `Cannot find implementation or library stub for module named "M"`
+  (`[import-not-found]`) when it is absent — same code, different baseline line
+  per machine. All three collapse onto ONE canonical `import-untyped` line keyed
+  by `M`, so the baseline multiset is identical either way.
+- **strips the once-per-run global stub notes.** mypy emits the
+  `(or run "mypy --install-types" …)` note, the `…#missing-imports` See note, and
+  the per-package `Hint: "… pip install …-stubs"` note ONCE per run, anchored to
+  the first missing-import site — so they relocate between files as the import
+  landscape shifts. Dropping them keeps them out of the baseline entirely.
+- **leaves everything else byte-identical.** Real type errors and all other
+  diagnostics pass through verbatim; the filter never drops an error line, so no
+  real finding is masked.
 
 Observed semantics (the reason no bespoke wrapper is needed):
 
