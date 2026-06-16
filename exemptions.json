@@ -1,6 +1,13 @@
 {
-  "frozen_count": 2,
+  "frozen_count": 3,
   "entries": [
+    {
+      "file": "src/cf_quality/gate_runner.py",
+      "symbol_or_line": "_exec",
+      "rule": "S603",
+      "reason": "subprocess.run executes only fixed argv assembled from the kit's own stage table (absolute tool paths / kit console scripts), no shell, no untrusted input",
+      "approver": "pending maintainer ratification (cf-gate runner build, 2026-06-16)"
+    },
     {
       "file": "src/cf_quality/exemptions.py",
       "symbol_or_line": "_run_fold_ins",
