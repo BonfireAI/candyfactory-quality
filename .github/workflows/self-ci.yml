@@ -1,9 +1,12 @@
 # candyfactory-quality · the kit's OWN CI — the gauge submits to its own gate.
 #
-# Deliberately NOT via workflow_call: the kit runs the same battery directly so
-# a broken reusable workflow can never grade itself green. Same commands, same
-# budgets (CC ≤ 10, ≤ 50 statements, files ≤ 500 lines, 0 mypy errors — this
-# repo adopts at baseline zero, so mypy runs bare with no baseline filter).
+# Deliberately NOT via workflow_call: the kit runs cf-gate DIRECTLY (the same
+# aggregating runner the reusable workflow ships) so a broken reusable workflow
+# can never grade itself green — self-ci invokes cf-gate as a command,
+# independent of quality-gate.yml's wiring. cf-gate runs the whole battery,
+# collects one verdict per stage, and exits on the worst. The kit adopts at
+# baseline zero: it commits a complexipy-snapshot.json watermark and synthesizes
+# an empty mypy baseline (== bare mypy) so the ratchet stages run without debt.
 name: self-ci
 
 on:
@@ -35,43 +38,35 @@ jobs:
           pip install -e '.[dev]'
           pip install pyyaml
 
-      - name: ruff check
-        run: ruff check .
+      - name: Boot the kit's zero mypy baseline (the kit adopts at baseline zero)
+        # The kit owes 0 type errors, so it carries the canonical zero-boot
+        # artifact: an EMPTY mypy-baseline.txt (BASELINE-CONVENTIONS.md §2 — a
+        # zero-error repo boots an empty baseline). cf-gate's mypy stage runs
+        # through the baseline ratchet and REFUSES a Python repo with none; an
+        # empty baseline is exactly bare mypy — every reported error is "new"
+        # and fails, nothing is laundered. Synthesized here (never committed):
+        # mypy-baseline.txt is the one watermark the kit does not keep on disk
+        # beside complexipy-snapshot.json.
+        run: '[ -f mypy-baseline.txt ] || : > mypy-baseline.txt'
 
-      - name: ruff format --check
-        run: ruff format --check .
-
-      - name: cf-sticky-check — this repo carries its own sticky intro
-        run: cf-sticky-check check .
-
-      - name: cf-file-budget — this repo obeys its own file budget
-        run: cf-file-budget check
-
-      - name: cf-mirror-check — this repo's declared mirrors hold
+      - name: cf-gate — the kit submits to its own aggregated gate
+        # DIRECT invocation of the installed console script — deliberately NOT
+        # quality-gate.yml via workflow_call. This preserves the cannot-self-
+        # grade-green property: a broken reusable-workflow YAML can never make
+        # self-ci pass, because self-ci runs cf-gate as a command, independent
+        # of that wiring. cf-gate runs the whole battery on the kit (ruff,
+        # ruff-format, the cf-* gates, mypy, complexipy against the committed
+        # snapshot, pytest), aggregates, and exits on the worst verdict; the
+        # board is teed into the run log AND the step summary. NO
+        # continue-on-error — the step's nonzero exit fails the job.
         run: |
-          if [ -f MIRRORS.md ]; then
-            cf-mirror-check check --repo .
-          else
-            echo "::notice::cf-mirror-check SKIPPED — no MIRRORS.md yet; the sticky-intro mirror of canon ADR 0029 + ADR 0030 must be declared before v0.1"
-          fi
-
-      - name: cf-recursion-check — recursion declared in the kit's own source
-        run: cf-recursion-check src
-
-      - name: cf-exemptions — the kit's suppressions trace to reasoned entries
-        run: cf-exemptions
-
-      - name: cf-import-contract — the kit's own layering contract holds
-        run: cf-import-contract --root .
-
-      - name: mypy (zero baseline — the new repo owes 0 type errors, bare)
-        run: mypy src
-
-      - name: complexipy — the kit's own cognitive-complexity watermark
-        # The kit ratchets FIRST (it submits before it preaches): a plain run
-        # compares against the committed complexipy-snapshot.json in CWD;
-        # never piped (piping masks the exit code — docs/tool-spikes.md).
-        run: complexipy src
-
-      - name: pytest
-        run: pytest
+          set +e
+          {
+            echo "### cf-gate — the kit's aggregated quality verdict"
+            echo ""
+            echo '```text'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cf-gate | tee -a "$GITHUB_STEP_SUMMARY"
+          status="${PIPESTATUS[0]}"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

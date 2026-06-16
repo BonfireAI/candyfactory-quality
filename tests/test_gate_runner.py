@@ -31,9 +31,10 @@ from pathlib import Path
 import pytest
 
 from cf_quality import gate_runner
-from cf_quality.errors import GateVerdict, GateViolation
+from cf_quality.errors import GateError, GateVerdict, GateViolation
 from cf_quality.gate_runner import battery_exit_code, run_battery
 from cf_quality.import_contract import main as import_contract_main
+from cf_quality.repo_config import first_party_packages
 
 KIT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -367,3 +368,113 @@ def test_import_contract_aggregates_passes_into_one_verdict(
     assert exit_code == 1
     assert "CONTRACT_LINT_WILDCARD" in out, "PASS 1 finding"
     assert "CONTRACT_DYNAMIC_IMPORT" in out, "PASS 3 finding — aggregated, not fail-fast"
+
+
+# --- per-stage targeting (migrated down from the YAML-altitude battery) -------
+#
+# These behaviors used to be asserted by PARSING quality-gate.yml's discrete
+# steps. The ~11 fail-fast steps collapsed into the one cf-gate step, so the
+# behaviors now LIVE in gate_runner and are pinned here, at the altitude they
+# actually run: ruff rides the derived known-first-party; that first-party set
+# is the SAME one cf-repo-config resolves; complexipy refuses a Python repo
+# with no snapshot, skips a Python-free one visibly, and targets the resolved
+# source_root in a single unpiped process (a pipe would mask its exit code).
+
+
+def _layout(root: Path, *, first_party: str = "[]", py_present: bool = True) -> gate_runner.Layout:
+    """A Layout for unit-testing one stage in isolation (source_root == src/)."""
+    return gate_runner.Layout(
+        root=root,
+        source_root=root / "src",
+        package_dir=root,
+        first_party=first_party,
+        py_present=py_present,
+    )
+
+
+def _record_calls(
+    monkeypatch: pytest.MonkeyPatch, calls: list[tuple[list[str], str | None]]
+) -> None:
+    """Stub the subprocess seam to record (argv, stdin) and report a clean run."""
+    monkeypatch.setattr(gate_runner, "_tool", lambda name: Path("/fake") / name)
+
+    def recording_exec(
+        argv: list[str],
+        cwd: Path,
+        env: Mapping[str, str],
+        *,
+        stdin: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((list(argv), stdin))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(gate_runner, "_exec", recording_exec)
+
+
+def test_ruff_check_rides_layout_first_party(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The shared ruff gauge cannot name every consumer's packages, so the gate
+    # splices the derived names into ruff's inline known-first-party override —
+    # the I001 cross-config conflict's control rod, now an argv assertion.
+    calls: list[tuple[list[str], str | None]] = []
+    _record_calls(monkeypatch, calls)
+    layout = _layout(tmp_path, first_party='["acme", "acme_core"]')
+
+    gate_runner._ruff_check(layout, {})
+
+    argv = calls[0][0]
+    assert Path(argv[0]).name == "ruff" and argv[1] == "check"
+    assert 'lint.isort.known-first-party=["acme", "acme_core"]' in argv
+
+
+def test_layout_first_party_derives_from_resolved_source_root(tmp_path: Path) -> None:
+    # The first-party set ruff rides is derived from the consumer's OWN resolved
+    # source root — the exact list cf-repo-config emits (one resolver, never two).
+    _write(tmp_path, "src/acme/__init__.py", "")
+    _write(tmp_path, "src/acme/core.py", "X = 1\n")
+
+    layout = gate_runner._resolve_layout(tmp_path)
+
+    assert layout.first_party == json.dumps(first_party_packages(tmp_path))
+    assert "acme" in json.loads(layout.first_party), "the package is a derived first-party name"
+
+
+def test_complexipy_refuses_python_repo_without_snapshot(tmp_path: Path) -> None:
+    # Same doctrine as the mypy baseline: green-by-file-absence is opt-in gaming.
+    # A Python repo with no snapshot REFUSES with a typed GateError.
+    _write(tmp_path, "pkg.py", "x = 1\n")
+    layout = _layout(tmp_path, py_present=True)
+
+    with pytest.raises(GateError) as excinfo:
+        gate_runner._complexipy(layout, {})
+
+    assert excinfo.value.code == "GATE_COMPLEXIPY_SNAPSHOT_MISSING"
+
+
+def test_complexipy_skips_python_free_repo_visibly(tmp_path: Path) -> None:
+    # Only a Python-free repo may skip — the stage returns None (the battery
+    # omits it from the board), never a silent green.
+    layout = _layout(tmp_path, py_present=False)
+
+    assert gate_runner._complexipy(layout, {}) is None
+
+
+def test_complexipy_targets_source_root_in_one_unpiped_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With the snapshot present, complexipy grades the resolved source_root as a
+    # SINGLE process — piping it (as the mypy stage pipes through the filter)
+    # would mask its exit code (the tool-spike defect this rod fences off).
+    _write(tmp_path, "complexipy-snapshot.json", "{}")
+    calls: list[tuple[list[str], str | None]] = []
+    _record_calls(monkeypatch, calls)
+    layout = _layout(tmp_path)
+
+    verdict = gate_runner._complexipy(layout, {})
+
+    assert verdict is not None and verdict.passed
+    assert len(calls) == 1, "one unpiped process — no stdin handoff like the mypy filter pipe"
+    argv, stdin = calls[0]
+    assert argv == [str(Path("/fake") / "complexipy"), str(tmp_path / "src")]
+    assert stdin is None
