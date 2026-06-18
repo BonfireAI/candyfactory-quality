@@ -40,6 +40,7 @@ cf-exemptions = "cf_quality.exemptions:main"
 cf-repo-config = "cf_quality.repo_config:main"
 cf-import-contract = "cf_quality.import_contract:main"
 cf-gate = "cf_quality.gate_runner:main"
+cf-burn-land = "cf_quality.burn_land:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -62,14 +63,14 @@ include_external_packages = false
 exclude_type_checking_imports = false
 
 [[tool.importlinter.contracts]]
-# The kit's measured layering: the six gate modules sit above repo_config
+# The kit's measured layering: the seven gate modules sit above repo_config
 # (declared-layout resolution) above errors (the typed failure vocabulary).
 # Sibling gates are independent — no gate imports another gate.
 name = "the gates sit above repo_config above errors"
 type = "layers"
 containers = ["cf_quality"]
 layers = [
-    "exemptions | file_budget | gate_runner | import_contract | mirror_check | recursion_check | sticky_check",
+    "burn_land | exemptions | file_budget | gate_runner | import_contract | mirror_check | recursion_check | sticky_check",
     "repo_config",
     "errors",
 ]
