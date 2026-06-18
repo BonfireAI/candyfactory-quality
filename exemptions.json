@@ -1,5 +1,5 @@
 {
-  "frozen_count": 4,
+  "frozen_count": 5,
   "entries": [
     {
       "file": "src/cf_quality/gate_runner.py",
@@ -7,6 +7,13 @@
       "rule": "S603",
       "reason": "subprocess.run executes only fixed argv assembled from the kit's own stage table (absolute tool paths / kit console scripts), no shell, no untrusted input",
       "approver": "pending maintainer ratification (cf-gate runner build, 2026-06-16)"
+    },
+    {
+      "file": "src/cf_quality/install_hook.py",
+      "symbol_or_line": "_exec",
+      "rule": "S603",
+      "reason": "subprocess.run executes only fixed argv (git absolute path resolved via shutil.which), no shell, no untrusted input — the hook installer asks git rev-parse for the hooks dir and writes a file",
+      "approver": "pending maintainer ratification (cf-install-hook gate build, 2026-06-17)"
     },
     {
       "file": "src/cf_quality/burn_land.py",
