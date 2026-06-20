@@ -53,18 +53,26 @@ function findLocalTsc(startDir: string): string | null {
 }
 
 /** Discriminated result of a tsc spawn. */
-type SpawnOutcome = { kind: 'output'; text: string } | { kind: 'error'; message: string };
+type SpawnOutcome =
+  | { kind: 'output'; text: string; status: number | null }
+  | { kind: 'error'; message: string };
 
 /**
- * Spawn tsc --noEmit -p <project> and return captured stdout+stderr.
+ * Spawn tsc --noEmit --pretty false -p <project> and return captured
+ * stdout+stderr along with the process exit status.
+ *
+ * `--pretty false` prevents a consumer tsconfig with `"pretty": true` from
+ * ANSI-wrapping diagnostics past the ERROR_LINE_RE regex.
  *
  * tsc exits non-zero when type errors exist — that is expected and NOT treated
  * as a spawn error.  Only a failure to exec the binary itself is an error.
  */
 function runTsc(projectPath: string, tscBin: string): SpawnOutcome {
-  const result = spawnSync(tscBin, ['--noEmit', '-p', projectPath], {
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    tscBin,
+    ['--noEmit', '--pretty', 'false', '-p', projectPath],
+    { encoding: 'utf8' },
+  );
 
   if (result.error !== undefined) {
     return {
@@ -74,7 +82,7 @@ function runTsc(projectPath: string, tscBin: string): SpawnOutcome {
   }
 
   const text = [result.stdout ?? '', result.stderr ?? ''].join('\n');
-  return { kind: 'output', text };
+  return { kind: 'output', text, status: result.status };
 }
 
 /**
@@ -170,6 +178,24 @@ export function tscStrictGate(opts: TscStrictOpts): Gate {
       }
 
       const current = parseErrors(outcome.text);
+      const rawParsedCount = current.length;
+
+      // Guard: tsc exited non-zero but produced no parseable positioned
+      // diagnostics (e.g. TS18003 "No inputs were found", TS6053 file-not-
+      // found).  Without this check the gate would silently return ok:true
+      // while checking nothing.  When tsc finds positioned errors that are ALL
+      // covered by the baseline, rawParsedCount > 0, so this branch does NOT
+      // fire — the existing baseline-covered path is unaffected.
+      if (outcome.status !== null && outcome.status !== 0 && rawParsedCount === 0) {
+        const tail = outcome.text.slice(-200).trim();
+        return {
+          gate: GATE_NAME,
+          ok: false,
+          problems: [
+            `TSC_UNPARSED_FAILURE: tsc exited ${outcome.status} with no parseable diagnostics: ${tail}`,
+          ],
+        };
+      }
 
       let problems: string[];
       if (opts.baseline !== undefined) {

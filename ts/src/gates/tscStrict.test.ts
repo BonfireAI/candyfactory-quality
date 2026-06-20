@@ -86,3 +86,24 @@ describe('tscStrictGate — clean fixture', () => {
     expect(result.problems).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// No-inputs fixture (TS18003) → fail-open is closed
+// ---------------------------------------------------------------------------
+
+describe('tscStrictGate — no-inputs fixture', () => {
+  it('returns ok:false with TSC_UNPARSED_FAILURE when tsc emits TS18003', async () => {
+    // The no-inputs/tsconfig.json includes a non-existent directory so tsc
+    // exits non-zero with TS18003 "No inputs were found", producing no
+    // positioned diagnostic lines.  The gate must NOT silently return ok:true.
+    const gate = tscStrictGate({
+      project: join(RODS_DIR, 'no-inputs', 'tsconfig.json'),
+    });
+    const result = await gate.run();
+
+    expect(result.gate).toBe('tsc-strict');
+    expect(result.ok).toBe(false);
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]).toMatch(/^TSC_UNPARSED_FAILURE:/);
+  });
+});

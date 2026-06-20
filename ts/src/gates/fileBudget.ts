@@ -107,7 +107,8 @@ function collectFiles(
   const entries = readdirSync(dir);
   for (const entry of entries) {
     const full = join(dir, entry);
-    const st = statSync(full);
+    const st = statSync(full, { throwIfNoEntry: false });
+    if (st === undefined) continue;
     if (st.isDirectory()) {
       if (!EXCLUDED_DIRS.has(entry)) {
         collectFiles(full, cwd, out);
@@ -148,6 +149,8 @@ export function fileBudgetGate(opts: FileBudgetOpts): Gate {
       const cwd = process.cwd();
       const collected = new Map<string, number>();
       for (const root of opts.roots) {
+        const rootStat = statSync(root, { throwIfNoEntry: false });
+        if (rootStat === undefined) continue;
         collectFiles(root, cwd, collected);
       }
 
