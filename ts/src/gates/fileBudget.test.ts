@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { join } from 'node:path';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
 import { measureFile, fileBudgetGate } from './fileBudget.js';
 import { isShrinkOnly } from '../baseline/baseline.js';
 import type { Baseline } from '../baseline/baseline.js';
@@ -88,5 +90,34 @@ describe('isShrinkOnly — growth detection', () => {
     const current: Record<string, number> = { 'src/small.ts': 100 };
     const problems = isShrinkOnly(current, {}, 500);
     expect(problems).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. fileBudgetGate — integration: baseline loaded from disk (shrink-only)
+// ---------------------------------------------------------------------------
+describe('fileBudgetGate — baseline loaded from disk', () => {
+  it('passes a frozen file when its baseline count is read from disk', async () => {
+    // The gate computes relative-path keys as relative(process.cwd(), absolutePath),
+    // so we must use the same computation to match the baseline key at run time.
+    const count = measureFile(ROD_FILE);
+    const rodKey = relative(process.cwd(), ROD_FILE);
+    const baselineObj = { [rodKey]: count };
+
+    const tmpFile = join(tmpdir(), `kt2-baseline-${Date.now()}.json`);
+    writeFileSync(tmpFile, JSON.stringify(baselineObj), 'utf8');
+
+    try {
+      const result = await fileBudgetGate({ roots: [ROD_DIR], baseline: tmpFile }).run();
+      expect(result.ok).toBe(true);
+      expect(result.problems).toHaveLength(0);
+    } finally {
+      unlinkSync(tmpFile);
+    }
+  });
+
+  it('fails the same root with no baseline', async () => {
+    const result = await fileBudgetGate({ roots: [ROD_DIR] }).run();
+    expect(result.ok).toBe(false);
   });
 });

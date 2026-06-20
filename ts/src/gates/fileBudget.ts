@@ -141,11 +141,11 @@ function collectFiles(
  */
 export function fileBudgetGate(opts: FileBudgetOpts): Gate {
   const max = opts.max ?? DEFAULT_MAX;
-  const cwd = process.cwd();
 
   return {
     name: GATE_NAME,
     run: async (): Promise<GateResult> => {
+      const cwd = process.cwd();
       const collected = new Map<string, number>();
       for (const root of opts.roots) {
         collectFiles(root, cwd, collected);
