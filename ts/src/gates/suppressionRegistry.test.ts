@@ -122,7 +122,23 @@ describe('findSuppressions — self-scan of gate source', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. findSuppressions — comment anchoring: string literal vs line comment
+// 6. findSuppressions — test files excluded from recursive walk
+// ---------------------------------------------------------------------------
+describe('findSuppressions — test files excluded from recursive walk', () => {
+  it('does not surface hits from *.test.ts files when walking src/', () => {
+    // suppressionRegistry.test.ts contains @ts-ignore inside fixture strings;
+    // a directory walk must not scan it (test files are excluded by walkDir).
+    // Explicit file roots are unaffected — this guard fires only on dir walks.
+    const suppressions = findSuppressions([SRC_DIR]);
+    const testFileHit = suppressions.find(
+      s => s.file.endsWith('.test.ts') || s.file.endsWith('.test.tsx'),
+    );
+    expect(testFileHit).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. findSuppressions — comment anchoring: string literal vs line comment
 // ---------------------------------------------------------------------------
 describe('findSuppressions — comment anchoring', () => {
   it('ignores directive words in string literals and detects them in // comments', () => {

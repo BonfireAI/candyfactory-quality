@@ -20,6 +20,16 @@ const REAL_CONFIG = fileURLToPath(
   new URL('../../.dependency-cruiser.cjs', import.meta.url),
 );
 
+/**
+ * Rod-local contract: same forbidden rules as the real config but WITHOUT the
+ * `exclude: { path: '__rods__' }` option so test #1 can cruise the rod dir and
+ * prove CONTRACT_BROKEN.  The real config excludes __rods__ (Fix 2), which is
+ * why test #1 must use this dedicated config instead of REAL_CONFIG.
+ */
+const ROD_CONFIG = fileURLToPath(
+  new URL('./__rods__/upwardImport/contract.cjs', import.meta.url),
+);
+
 /** Rod directory: contains core/badImporter.ts → adapters/secret.ts */
 const ROD_DIR = join(GATES_DIR, '__rods__', 'upwardImport');
 
@@ -31,7 +41,10 @@ const CLEAN_DIR = fileURLToPath(new URL('../runner', import.meta.url));
 // ─────────────────────────────────────────────────────────────────────────────
 describe('importContractGate — upwardImport rod', () => {
   it('returns ok=false and a CONTRACT_BROKEN problem naming the core→adapters edge', async () => {
-    const gate = importContractGate({ config: REAL_CONFIG, roots: [ROD_DIR] });
+    // Use ROD_CONFIG (no __rods__ exclude) rather than REAL_CONFIG so the rod
+    // dir is actually cruised.  The real config now excludes __rods__ so that
+    // the kit's own self-run does not report the intentional DIP violation.
+    const gate = importContractGate({ config: ROD_CONFIG, roots: [ROD_DIR] });
     const result = await gate.run();
 
     expect(result.gate).toBe('import-contract');

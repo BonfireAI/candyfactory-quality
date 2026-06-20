@@ -43,6 +43,9 @@ async function main(): Promise<void> {
 
   const results = await runCfGateTs(gates);
   console.log(digest(results));
+  for (const r of results) {
+    if (!r.ok) { console.error(`\n${r.gate}:`); for (const p of r.problems) console.error(`  - ${p}`); }
+  }
   if (results.some((r) => !r.ok)) process.exit(1);
 }
 

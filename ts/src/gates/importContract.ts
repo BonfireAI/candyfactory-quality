@@ -44,6 +44,58 @@ function buildRuleSet(config: IConfiguration): IFlattenedRuleSet {
 }
 
 /**
+ * Run dependency-cruiser with the given config and roots, returning problem
+ * strings for each error-severity violation found.
+ *
+ * Throws on cruise failure (caught by the caller's try/catch so that all
+ * failure paths produce a typed CONTRACT_CONFIG_ERROR problem string).
+ * Throws also when cruise returns string output, which indicates a mis-use
+ * of the programmatic API (an outputType was set unexpectedly).
+ */
+async function cruiseViolations(
+  config: IConfiguration,
+  configDir: string,
+  roots: string[],
+): Promise<string[]> {
+  const ruleSet = buildRuleSet(config);
+  const cruiseOptions: ICruiseOptions = {
+    ...(config.options ?? {}),
+    validate: true,
+    ruleSet,
+  };
+
+  // Make tsConfig.fileName absolute relative to the config file's own
+  // directory so cruise finds tsconfig.json regardless of process.cwd()
+  // (which is not guaranteed to be `ts/` inside a vitest worker).
+  if (cruiseOptions.tsConfig !== undefined) {
+    const existingFileName = cruiseOptions.tsConfig.fileName ?? 'tsconfig.json';
+    cruiseOptions.tsConfig = {
+      ...cruiseOptions.tsConfig,
+      fileName: resolve(configDir, existingFileName),
+    };
+  }
+
+  const { output } = await cruise(roots, cruiseOptions);
+
+  if (typeof output === 'string') {
+    // Programmatic API should never return a string without an explicit
+    // outputType; treat it as a config error rather than silently passing.
+    throw new Error(
+      'dependency-cruiser returned string output; ' +
+        'pass no outputType when using the programmatic API',
+    );
+  }
+
+  const violations = output.summary.violations.filter(
+    (v) => v.rule.severity === 'error',
+  );
+
+  return violations.map(
+    (v) => `CONTRACT_BROKEN: ${v.rule.name} ${v.from} -> ${v.to}`,
+  );
+}
+
+/**
  * Gate that enforces the project's import contract: layering direction (core
  * never imports adapters/packs/tenants) and no import cycles.
  *
@@ -69,8 +121,9 @@ export function importContractGate(opts: ImportContractOpts): Gate {
     run: async (): Promise<GateResult> => {
       // ── 1. Load the ruleset config ──────────────────────────────────────
       // Resolve the config path up-front so configDir is available for
-      // making tsConfig.fileName absolute below. resolve() never throws —
-      // only _require() throws if the file is absent or unparseable.
+      // making tsConfig.fileName absolute in cruiseViolations. resolve()
+      // never throws — only _require() throws if the file is absent or
+      // unparseable.
       const absoluteConfig = resolve(opts.config);
       const configDir = dirname(absoluteConfig);
 
@@ -99,47 +152,7 @@ export function importContractGate(opts: ImportContractOpts): Gate {
 
       // ── 3. Run dependency-cruiser and collect error-severity violations ──
       try {
-        const ruleSet = buildRuleSet(config);
-        const cruiseOptions: ICruiseOptions = {
-          ...(config.options ?? {}),
-          validate: true,
-          ruleSet,
-        };
-
-        // Make tsConfig.fileName absolute relative to the config file's own
-        // directory so cruise finds tsconfig.json regardless of process.cwd()
-        // (which is not guaranteed to be `ts/` inside a vitest worker).
-        if (cruiseOptions.tsConfig !== undefined) {
-          const existingFileName = cruiseOptions.tsConfig.fileName ?? 'tsconfig.json';
-          cruiseOptions.tsConfig = {
-            ...cruiseOptions.tsConfig,
-            fileName: resolve(configDir, existingFileName),
-          };
-        }
-
-        const { output } = await cruise(opts.roots, cruiseOptions);
-
-        if (typeof output === 'string') {
-          // Programmatic API should never return a string without an explicit
-          // outputType; treat it as a config error rather than silently passing.
-          return {
-            gate: GATE_NAME,
-            ok: false,
-            problems: [
-              'CONTRACT_CONFIG_ERROR: dependency-cruiser returned string output; ' +
-                'pass no outputType when using the programmatic API',
-            ],
-          };
-        }
-
-        const violations = output.summary.violations.filter(
-          (v) => v.rule.severity === 'error',
-        );
-
-        const problems = violations.map(
-          (v) => `CONTRACT_BROKEN: ${v.rule.name} ${v.from} -> ${v.to}`,
-        );
-
+        const problems = await cruiseViolations(config, configDir, opts.roots);
         return {
           gate: GATE_NAME,
           ok: problems.length === 0,

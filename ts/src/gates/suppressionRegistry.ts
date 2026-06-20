@@ -125,7 +125,12 @@ function scanFile(absPath: string, relPath: string, out: Suppression[]): void {
 
 /**
  * Recursively walk `dir` for `*.ts` / `*.tsx` files, skipping subdirectories
- * whose name appears in EXCLUDED_DIR_NAMES.  Results appended to `out`.
+ * whose name appears in EXCLUDED_DIR_NAMES and skipping test files
+ * (`*.test.ts` / `*.test.tsx`).  Test files legitimately contain directive
+ * words as fixture data; scanning them produces false positives.  Explicit
+ * file roots passed to `findSuppressions` are still scanned verbatim.
+ *
+ * Results appended to `out`.
  */
 function walkDir(dir: string, cwd: string, out: Suppression[]): void {
   const entries = readdirSync(dir);
@@ -138,7 +143,8 @@ function walkDir(dir: string, cwd: string, out: Suppression[]): void {
       }
     } else {
       const ext = extname(entry);
-      if (ext === '.ts' || ext === '.tsx') {
+      const isTestFile = entry.endsWith('.test.ts') || entry.endsWith('.test.tsx');
+      if ((ext === '.ts' || ext === '.tsx') && !isTestFile) {
         scanFile(full, relative(cwd, full), out);
       }
     }
