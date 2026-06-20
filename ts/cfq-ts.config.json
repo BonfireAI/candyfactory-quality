@@ -1,0 +1,6 @@
+{
+  "roots": ["src"],
+  "importContractConfig": ".dependency-cruiser.cjs",
+  "suppressionRegistry": "cfq-ts-exemptions.json",
+  "tsconfig": "tsconfig.json"
+}

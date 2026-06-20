@@ -1,4 +1,6 @@
+import { resolve, dirname } from 'node:path';
 import type { Gate, GateResult } from './types.js';
+import { loadConfig, buildGates, CfGateConfigError } from './config.js';
 
 /**
  * Runs each gate in sequence and returns all results.
@@ -23,8 +25,22 @@ export function digest(results: GateResult[]): string {
 }
 
 async function main(): Promise<void> {
-  // KT7 wires the real gate set here; for now the runner is empty-but-green.
-  const gates: Gate[] = [];
+  const configArg = process.argv[2] ?? 'cfq-ts.config.json';
+  const configPath = resolve(configArg);
+
+  let gates: Gate[];
+  try {
+    const config = loadConfig(configPath);
+    gates = buildGates(config, dirname(configPath));
+  } catch (err) {
+    const msg = err instanceof CfGateConfigError
+      ? `cf-gate-ts: ${err.kind}: ${err.message}`
+      : `cf-gate-ts: unexpected error loading config: ${String(err)}`;
+    console.error(msg);
+    // process.exit returns never; the return satisfies no-untyped-catch.
+    return process.exit(1);
+  }
+
   const results = await runCfGateTs(gates);
   console.log(digest(results));
   if (results.some((r) => !r.ok)) process.exit(1);
