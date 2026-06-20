@@ -1,4 +1,5 @@
 import parser from '@typescript-eslint/parser';
+import noUntypedCatch from './src/gates/eslint-rules/no-untyped-catch.mjs';
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
@@ -19,6 +20,13 @@ export default [
      */
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: { parser },
+    plugins: {
+      local: {
+        rules: {
+          'no-untyped-catch': noUntypedCatch,
+        },
+      },
+    },
     rules: {
       /**
        * KISS gate rules (ADR 0030 / BubbleGum Law):
@@ -27,6 +35,13 @@ export default [
        */
       complexity: ['error', 10],
       'max-statements': ['error', 50],
+      /**
+       * Fail-fast / Elegance Law rules (KT5):
+       *   no-empty (allowEmptyCatch:false) — no silent empty catch {}
+       *   local/no-untyped-catch           — catch must rethrow or return
+       */
+      'no-empty': ['error', { allowEmptyCatch: false }],
+      'local/no-untyped-catch': 'error',
     },
   },
 ];
