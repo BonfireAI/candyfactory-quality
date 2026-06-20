@@ -58,20 +58,65 @@ const DIRECTIVE_PATTERNS: DirectivePattern[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Comment extraction (anchors directive detection to comment context)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return only the comment text portions of a single source line.
+ *
+ * Handles:
+ *   - `//` line comments — everything after `//` is comment text.
+ *   - `/* ... *\/` block comments that open **and close** on the same line.
+ *
+ * Does not track multi-line block comment state: a `/*` with no matching `*\/`
+ * on the same line contributes the text from `/*` to end-of-line (which is
+ * safe — those lines are typically continuation lines with no directive).
+ *
+ * Directive words that appear only in code, strings, or regex literals are
+ * therefore excluded from the returned text, avoiding self-poison when the
+ * gate scans its own source (DIRECTIVE_PATTERNS contains the words as
+ * string/regex literals, not in comments).
+ */
+function extractCommentText(line: string): string {
+  const parts: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === '/' && line[i + 1] === '/') {
+      parts.push(line.slice(i + 2));
+      break;
+    }
+    if (line[i] === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2);
+      if (end === -1) {
+        parts.push(line.slice(i + 2));
+        break;
+      }
+      parts.push(line.slice(i + 2, end));
+      i = end + 2;
+    } else {
+      i++;
+    }
+  }
+  return parts.join(' ');
+}
+
+// ---------------------------------------------------------------------------
 // File scanner (own small walk — lane-independent per ADR 0030 §4)
 // ---------------------------------------------------------------------------
 
 /**
  * Scan a single file for suppression directives and append findings to `out`.
  * `relPath` is the path used in the emitted Suppression objects.
+ * Directives are detected only within comment text (see `extractCommentText`).
  */
 function scanFile(absPath: string, relPath: string, out: Suppression[]): void {
   const content = readFileSync(absPath, 'utf8');
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
+    const commentText = extractCommentText(line);
     for (const { directive, pattern } of DIRECTIVE_PATTERNS) {
-      if (pattern.test(line)) {
+      if (pattern.test(commentText)) {
         out.push({ file: relPath, line: i + 1, directive });
       }
     }
@@ -130,10 +175,26 @@ export function findSuppressions(roots: string[]): Suppression[] {
 }
 
 /**
+ * Return true only when `entry` has the three fields required for a
+ * registry match: a string `file`, a number `line`, and a string `directive`.
+ * The optional `reason` and `blessedBy` fields are not validated here.
+ */
+function isValidRegistryEntry(entry: unknown): boolean {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const e = entry as Record<string, unknown>;
+  return (
+    typeof e['file'] === 'string' &&
+    typeof e['line'] === 'number' &&
+    typeof e['directive'] === 'string'
+  );
+}
+
+/**
  * Load the registry JSON from `registryPath`.
  *
  * - File absent / unreadable → returns `[]` (no suppressions blessed yet).
- * - File present but unparseable or not a JSON array → returns `{ error }`.
+ * - File present but unparseable, not a JSON array, or containing an entry
+ *   that lacks required fields (file/line/directive) → returns `{ error }`.
  */
 function loadRegistry(registryPath: string): RegistryEntry[] | { error: string } {
   let raw: string;
@@ -151,6 +212,11 @@ function loadRegistry(registryPath: string): RegistryEntry[] | { error: string }
   }
   if (!Array.isArray(parsed)) {
     return { error: `Registry at ${registryPath} is not a JSON array` };
+  }
+  if (!parsed.every(isValidRegistryEntry)) {
+    return {
+      error: `Registry at ${registryPath} contains an entry missing required fields (file, line, directive)`,
+    };
   }
   return parsed as RegistryEntry[];
 }

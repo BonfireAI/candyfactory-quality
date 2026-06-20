@@ -12,11 +12,14 @@ import type { RegistryEntry } from './suppressionRegistry.js';
 // import.meta.url = file:///…/ts/src/gates/suppressionRegistry.test.ts
 //   new URL('./__rods__/…', import.meta.url) → ts/src/gates/__rods__/…
 //   new URL('../',          import.meta.url) → ts/src/
+//   new URL('./…ts',        import.meta.url) → ts/src/gates/….ts
 // ---------------------------------------------------------------------------
 const ROD_FILE = fileURLToPath(
   new URL('./__rods__/unregisteredIgnore.fixture.ts', import.meta.url),
 );
 const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
+/** Absolute path to the gate's own source — used for the self-scan test. */
+const GATE_SRC = fileURLToPath(new URL('./suppressionRegistry.ts', import.meta.url));
 
 // ---------------------------------------------------------------------------
 // 1. findSuppressions — finds @ts-ignore in the rod file (explicit path)
@@ -104,5 +107,36 @@ describe('findSuppressions — __rods__ excluded from recursive walk', () => {
       s.file.includes('unregisteredIgnore.fixture'),
     );
     expect(rodHit).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. findSuppressions — self-scan: gate source must return zero suppressions
+//    (DIRECTIVE_PATTERNS has the words as string/regex literals, not comments)
+// ---------------------------------------------------------------------------
+describe('findSuppressions — self-scan of gate source', () => {
+  it('returns zero suppressions when scanning suppressionRegistry.ts itself', () => {
+    const suppressions = findSuppressions([GATE_SRC]);
+    expect(suppressions).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. findSuppressions — comment anchoring: string literal vs line comment
+// ---------------------------------------------------------------------------
+describe('findSuppressions — comment anchoring', () => {
+  it('ignores directive words in string literals and detects them in // comments', () => {
+    const tmpFile = join(tmpdir(), `kt6-anchor-${Date.now()}.ts`);
+    // Line 1: directive word only in a string literal — must NOT be detected.
+    // Line 2: directive in a // line comment — MUST be detected.
+    writeFileSync(tmpFile, "const x = '@ts-ignore';\n// @ts-ignore\n", 'utf8');
+    try {
+      const found = findSuppressions([tmpFile]);
+      const hits = found.filter(s => s.directive === '@ts-ignore');
+      expect(hits).toHaveLength(1);
+      expect(hits[0]?.line).toBe(2);
+    } finally {
+      unlinkSync(tmpFile);
+    }
   });
 });
