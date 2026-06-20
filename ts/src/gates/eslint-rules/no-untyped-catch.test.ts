@@ -13,6 +13,7 @@
  */
 
 import { RuleTester } from 'eslint';
+import type { Linter } from 'eslint';
 import parser from '@typescript-eslint/parser';
 import { describe, it } from 'vitest';
 import rule from './no-untyped-catch.mjs';
@@ -24,7 +25,7 @@ RuleTester.it = it;
 const tester = new RuleTester({
   languageOptions: {
     // Use the TypeScript-ESLint parser so TS syntax is handled correctly.
-    parser: parser as RuleTester['constructor']['prototype']['languageOptions']['parser'],
+    parser: parser as Linter.Parser,
   },
 });
 
@@ -82,6 +83,28 @@ tester.run('local/no-untyped-catch', rule, {
       code: `
         function a() {
           try { foo(); } catch (e) { console.error(e); }
+        }
+      `,
+      errors: [{ messageId: 'swallowed' }],
+    },
+    {
+      // Arrow function with a throw inside the catch — the outer catch still
+      // swallows; the nested arrow's throw does not count as handling.
+      name: 'nested arrow throw does not satisfy outer catch (swallow)',
+      code: `
+        function a() {
+          try { foo(); } catch (e) { setTimeout(() => { throw new Error('x'); }, 0); }
+        }
+      `,
+      errors: [{ messageId: 'swallowed' }],
+    },
+    {
+      // Function expression with a return inside the catch — same boundary rule:
+      // the inner return does not handle the outer catch.
+      name: 'nested function-expression return does not satisfy outer catch (swallow)',
+      code: `
+        function a() {
+          try { foo(); } catch (e) { const r = function() { return 1; }; }
         }
       `,
       errors: [{ messageId: 'swallowed' }],

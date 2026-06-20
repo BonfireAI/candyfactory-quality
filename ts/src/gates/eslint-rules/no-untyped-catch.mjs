@@ -26,6 +26,17 @@
 const SKIP_KEYS = new Set(['parent', 'range', 'loc', 'start', 'end', 'tokens', 'comments']);
 
 /**
+ * AST node types that introduce a new function scope.  `hasThrowOrReturn`
+ * must not descend into these: a throw/return inside a nested function does
+ * NOT handle the surrounding catch block.
+ */
+const FUNCTION_NODES = new Set([
+  'FunctionExpression',
+  'ArrowFunctionExpression',
+  'FunctionDeclaration',
+]);
+
+/**
  * Return true when `val` looks like an ESLint AST node (plain object with a
  * string `.type`).  Rejects arrays, primitives, and null.
  *
@@ -72,6 +83,7 @@ function arrayHasThrowOrReturn(arr) {
  */
 function hasThrowOrReturn(node) {
   if (node.type === 'ThrowStatement' || node.type === 'ReturnStatement') return true;
+  if (FUNCTION_NODES.has(node.type)) return false; // do not descend into nested function scopes
   for (const [key, val] of Object.entries(node)) {
     if (SKIP_KEYS.has(key)) continue;
     if (Array.isArray(val) && arrayHasThrowOrReturn(val)) return true;
