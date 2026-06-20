@@ -3,11 +3,13 @@ import parser from '@typescript-eslint/parser';
 /** @type {import('eslint').Linter.Config[]} */
 export default [
   /**
-   * Global ignores: build output and vendored dependencies only.
-   * __rods__ exclusion is NOT here — the gate's resolveFiles() handles it so
-   * that tests can still target a rod explicitly via an absolute file path.
+   * Global ignores: build output, vendored dependencies, and rod fixtures.
+   * Adding **\/__rods__\/** here means `eslint src` from the CLI skips rods.
+   * The gate itself constructs ESLint with `ignore: false` so that explicitly-
+   * passed rod file paths are still linted (ESLint v9 global ignores otherwise
+   * suppress explicitly-targeted files too).
    */
-  { ignores: ['node_modules/**', 'dist/**'] },
+  { ignores: ['node_modules/**', 'dist/**', '**/__rods__/**'] },
   {
     /**
      * Broad glob — matches ANY TypeScript file that ESLint is asked to lint,

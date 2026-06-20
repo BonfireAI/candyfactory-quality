@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { eslintGate, diffCounts, resolveFiles } from './eslintGate.js';
 
 /**
@@ -10,9 +11,10 @@ import { eslintGate, diffCounts, resolveFiles } from './eslintGate.js';
  * import.meta.url = file:///…/ts/src/gates/eslintGate.test.ts
  * new URL('./__rods__', import.meta.url).pathname → /…/ts/src/gates/__rods__
  *
- * The config no longer ignores __rods__ — resolveFiles() handles exclusion
- * during directory walks, while tests target rods via explicit absolute paths
- * (verbatim inclusion path) so the TS parser always applies.
+ * The config now has `**\/__rods__\/**` in global ignores (CLI safety), but the
+ * gate constructs ESLint with `ignore: false`, so explicit rod paths are still
+ * linted verbatim in tests below.  resolveFiles() separately excludes __rods__
+ * during directory walks.
  */
 const ROD_DIR = new URL('./__rods__', import.meta.url).pathname;
 const ROD_FILE = join(ROD_DIR, 'tooComplex.fixture.ts');
@@ -110,7 +112,15 @@ describe('eslintGate — clean fixture', () => {
 // ---------------------------------------------------------------------------
 describe('resolveFiles', () => {
   it('excludes __rods__ paths when walking a directory root', () => {
-    const files = resolveFiles(['src']);
+    // Use an absolute path derived from import.meta.url so the walk succeeds
+    // regardless of the process cwd (guards against vacuous-pass when cwd≠ts/).
+    // import.meta.url = file:///…/ts/src/gates/eslintGate.test.ts
+    // new URL('..', import.meta.url) → file:///…/ts/src/gates/../  = ts/src/
+    const srcDir = fileURLToPath(new URL('..', import.meta.url));
+    const files = resolveFiles([srcDir]);
+    // Sentinel: the walk must find at least one file — an empty result would
+    // make the __rods__ assertion below trivially true (vacuous pass).
+    expect(files.length).toBeGreaterThan(0);
     const hasRod = files.some(f => f.includes('__rods__'));
     expect(hasRod).toBe(false);
   });

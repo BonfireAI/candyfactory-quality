@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   // KT7 wires the real gate set here; for now the runner is empty-but-green.
   const gates: Gate[] = [];
   const results = await runCfGateTs(gates);
-  console.log(digest(results)); // eslint-disable-line no-console -- the runner's job is to report to the operator
+  console.log(digest(results));
   if (results.some((r) => !r.ok)) process.exit(1);
 }
 

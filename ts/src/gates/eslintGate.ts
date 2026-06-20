@@ -140,7 +140,11 @@ export function eslintGate(opts: EslintGateOpts): Gate {
         return { gate: GATE_NAME, ok: true, problems: [] };
       }
 
-      const eslint = new ESLint({ cwd });
+      // ignore: false — resolveFiles() already excludes __rods__/node_modules/
+      // dist from directory walks, so skipping global ignores is safe here AND
+      // ensures an explicitly-passed rod file path is still linted (ESLint v9
+      // global ignores would otherwise suppress explicitly-targeted files too).
+      const eslint = new ESLint({ cwd, ignore: false });
       const results = await eslint.lintFiles(files);
 
       // Accumulate error counts keyed by `${relpath}::${ruleId}`.
