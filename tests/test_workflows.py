@@ -7,8 +7,10 @@ These tests answer the Law-1 refuter's gaming vectors structurally:
   self-asserts its trigger context as its FIRST step, and the stub template
   bans ``paths:`` filters and ``continue-on-error`` in writing;
 - pin rot: every ``uses:`` reference is a full 40-hex commit SHA;
-- silent skips: the two conditional steps (mirror check, mypy baseline)
-  must emit a VISIBLE notice when they skip, never pass quietly.
+- incomplete verdicts: the ~11 discrete fail-fast gate steps collapse into a
+  SINGLE ``cf-gate`` step that runs every stage and aggregates, so a red run
+  reports the whole board (COMPLETE at the CI layer); the per-stage skip/refuse
+  semantics now live in ``cf_quality.gate_runner`` (its own test battery).
 """
 
 from __future__ import annotations
@@ -141,39 +143,31 @@ def test_gate_installs_kit_with_tool_battery() -> None:
     assert ".cf-quality[dev]" in script, "gate must install the kit's pinned tool battery"
 
 
-def test_gate_runs_full_battery_in_order() -> None:
+def test_gate_runs_one_aggregating_cf_gate_step() -> None:
+    # The ~11 fail-fast gate steps collapse into ONE cf-gate step: cf-gate runs
+    # every stage, collects one verdict each, and exits on the worst — so a red
+    # run reports the WHOLE board, not just the first failure (COMPLETE at CI).
+    steps = _steps(_load(GATE_PATH), "gate")
+    cf_steps = [s for s in steps if re.search(r"\bcf-gate\b", s.get("run", ""))]
+    assert len(cf_steps) == 1, "exactly one aggregating cf-gate step IS the gate"
+    # the discrete per-gate commands are no longer separate workflow steps —
+    # those verdicts are aggregated inside cf-gate.
     script = _run_script(_load(GATE_PATH), "gate")
-    battery = [
-        "ruff check",
-        "ruff format --check",
-        "cf-sticky-check check",
-        "cf-file-budget check",
-        "cf-mirror-check",
-        "cf-recursion-check",
-        "cf-exemptions",
-        "cf-import-contract",
-        "mypy-baseline filter",
-        "complexipy",
-        "pytest",
-    ]
-    positions = [script.find(cmd) for cmd in battery]
-    missing = [cmd for cmd, pos in zip(battery, positions, strict=True) if pos < 0]
-    assert not missing, f"battery commands missing from gate: {missing}"
-    assert positions == sorted(positions), "battery must run in the declared order"
+    assert "mypy-baseline filter" not in script
+    assert "ruff format --check" not in script
+    assert "complexipy " not in script
 
 
-def test_gate_mirror_step_skips_visibly_without_mirrors_md() -> None:
-    script = _run_script(_load(GATE_PATH), "gate")
-    assert "MIRRORS.md" in script
-    mirror_part = script[script.find("MIRRORS.md") :]
-    assert "::notice::" in mirror_part, "mirror skip must be a visible notice, never silent"
-
-
-def test_gate_mypy_step_skips_visibly_without_baseline() -> None:
-    script = _run_script(_load(GATE_PATH), "gate")
-    assert "mypy-baseline.txt" in script
-    mypy_part = script[script.find("mypy-baseline.txt") :]
-    assert "::notice::" in mypy_part, "baseline skip must be a visible notice, never silent"
+def test_gate_cf_gate_step_tees_board_to_step_summary() -> None:
+    # A red CI run must surface every failing gate in the run summary, not bury
+    # it in the logs: the cf-gate board is teed into $GITHUB_STEP_SUMMARY.
+    cf_run = next(
+        s["run"]
+        for s in _steps(_load(GATE_PATH), "gate")
+        if re.search(r"\bcf-gate\b", s.get("run", ""))
+    )
+    assert "GITHUB_STEP_SUMMARY" in cf_run, "the aggregated board must reach the step summary"
+    assert "tee" in cf_run, "the board is teed so it appears in BOTH the log and the summary"
 
 
 def test_gate_action_uses_are_full_sha_pinned() -> None:
@@ -195,21 +189,16 @@ def test_self_ci_has_no_continue_on_error_or_paths_filter() -> None:
     assert "paths" not in keys and "paths-ignore" not in keys
 
 
-def test_self_ci_runs_the_same_battery_on_itself() -> None:
-    script = _run_script(_load(SELF_CI_PATH), "gate")
-    for cmd in (
-        "ruff check",
-        "ruff format --check",
-        "cf-sticky-check check",
-        "cf-file-budget check",
-        "cf-mirror-check",
-        "cf-recursion-check",
-        "cf-exemptions",
-        "mypy",
-        "complexipy",
-        "pytest",
-    ):
-        assert cmd in script, f"self-ci missing battery command: {cmd}"
+def test_self_ci_gates_through_cf_gate_directly() -> None:
+    # The kit submits to its own gate via the INSTALLED cf-gate console script,
+    # NOT via quality-gate.yml's workflow_call — so a broken reusable workflow
+    # can never self-grade the kit green.
+    data = _load(SELF_CI_PATH)
+    script = _run_script(data, "gate")
+    assert re.search(r"\bcf-gate\b", script), "self-ci must run the aggregating cf-gate"
+    assert "pip install -e '.[dev]'" in script, "self-ci installs the kit + [dev] first"
+    for job in data["jobs"].values():
+        assert "uses" not in job, "self-ci must not delegate its job to a reusable workflow"
 
 
 def test_self_ci_action_uses_are_full_sha_pinned() -> None:
@@ -271,42 +260,25 @@ def test_sha_pin_doctrine_is_ten_lines_and_names_the_mechanisms() -> None:
     assert "40-hex" in text or "full commit SHA" in text
 
 
-# --- refuter pass: workflow-altitude fixes ------------------------------------
-
-
-def test_gate_mypy_refuses_python_repo_without_baseline() -> None:
-    # Refuter: a missing mypy-baseline.txt skipped type checking entirely —
-    # "0 new type errors" was opt-in by file presence. A Python repo with no
-    # baseline must FAIL; the visible skip remains only for Python-free repos.
-    script = _run_script(_load(GATE_PATH), "gate")
-    mypy_part = script[script.find("mypy-baseline.txt") :]
-    assert "::error::" in mypy_part, "a Python repo without a baseline must fail loudly"
-    assert "exit 1" in mypy_part
-    assert "::notice::" in mypy_part, "the Python-free skip stays visible"
-
-
-def test_gate_mypy_targets_resolved_source_root() -> None:
-    # Flat-layout consumers must not escape the type gate via a hardcoded
-    # `src`, and a monorepo (package in a subdir) must not draw a vacuous
-    # gate: the target is resolved by cf-repo-config (declared layout when
-    # committed, the historical src/root discovery when absent).
-    script = _run_script(_load(GATE_PATH), "gate")
-    mypy_part = script[script.find("mypy-baseline.txt") :]
-    assert 'mypy "$CF_SOURCE_ROOT"' in mypy_part
-
-
-# --- mount-wave fixes: declared layout (zero-inputs doctrine preserved) --------
+# --- workflow-altitude doctrine: layout resolution (zero-inputs preserved) ----
+#
+# The per-gate verdicts (ruff against the kit gauge, mypy through the baseline
+# ratchet and its source-root targeting, complexipy, pytest from the package
+# dir) moved INTO cf-gate when the ~11 fail-fast steps collapsed into the one
+# aggregating step; those semantics now carry their own battery in
+# cf_quality.gate_runner. The workflow keeps only the layout resolution it
+# still needs at the YAML layer: the consumer package dir, resolved before the
+# consumer install so an invalid declaration fails typed before the gate runs.
 
 
 def test_gate_resolves_declared_layout_before_consumer_install() -> None:
     # Layout comes from COMMITTED consumer state via cf-repo-config — never a
-    # caller knob (the inputs block stays empty). Resolution runs before the
-    # consumer install so an invalid declaration fails typed before anything
-    # is graded against the wrong tree.
+    # caller knob (the inputs block stays empty). The package dir is resolved
+    # before the consumer install so an invalid declaration fails typed before
+    # anything is graded; cf-gate self-resolves the FULL layout internally.
     script = _run_script(_load(GATE_PATH), "gate")
-    resolve_pos = script.find("cf-repo-config source-root")
-    assert resolve_pos >= 0, "the gate must resolve the declared source root"
-    assert "cf-repo-config package-dir" in script
+    resolve_pos = script.find("cf-repo-config package-dir")
+    assert resolve_pos >= 0, "the gate must resolve the declared package dir"
     install_pos = script.find("pip install -e")
     assert install_pos > resolve_pos, "layout resolution must precede the consumer install"
 
@@ -315,23 +287,6 @@ def test_gate_consumer_install_rides_declared_package_dir() -> None:
     script = _run_script(_load(GATE_PATH), "gate")
     install_part = script[script.find("pyproject.toml — consumer") - 200 :]
     assert 'cd "$CF_PACKAGE_DIR"' in install_part
-
-
-def test_gate_pytest_runs_in_declared_package_dir() -> None:
-    # A monorepo's pytest config + importable package live in the package
-    # dir; running from the umbrella root collected un-importable tests.
-    steps = _steps(_load(GATE_PATH), "gate")
-    pytest_steps = [s for s in steps if "pytest" in s.get("run", "")]
-    assert len(pytest_steps) == 1
-    assert 'cd "$CF_PACKAGE_DIR"' in pytest_steps[0]["run"]
-
-
-def test_gate_ruff_runs_against_the_kit_pinned_gauge() -> None:
-    # Refuter: a hollow vendored ruff.toml passed the presence-only assert and
-    # neutered the battery. CI now grades by the kit checkout's own gauge.
-    script = _run_script(_load(GATE_PATH), "gate")
-    kit_config = '--config "$GITHUB_WORKSPACE/.cf-quality/configs/ruff-base.toml"'
-    assert script.count(kit_config) >= 2, "both ruff check and ruff format ride the kit gauge"
 
 
 def test_gate_self_assert_comment_matches_partial_verdict() -> None:
