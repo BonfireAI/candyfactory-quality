@@ -370,29 +370,52 @@ def _missing_contract_verdict(root: Path) -> int:
     return print_verdict("cf-import-contract", [violation])
 
 
-def _run_gate(root: Path) -> int:
-    table = _load_contract_table(root)
-    if table is None:
-        return _missing_contract_verdict(root)
-    lint_violations = lint_contract(root)
-    if lint_violations:
-        return print_verdict("cf-import-contract", lint_violations)
-    exit_code, output = _run_lint_imports(root)
-    pass_two = _pass_two_violations(exit_code, output)
-    if pass_two:
-        return print_verdict("cf-import-contract", pass_two)
-    notices = [
+_CLEAN_SUMMARY = (
+    "cf-import-contract: OK (contract linted, lint-imports kept, no module-level "
+    "dynamic imports)"
+)
+
+
+def _pass_two(root: Path, *, tolerate_config_error: bool) -> list[GateViolation]:
+    """PASS 2 — lint-imports as typed findings, aggregated with the other passes.
+
+    A pass-2 config error (an uninstalled src-layout package, unreadable config)
+    is tolerated ONLY when PASS 1 already condemned the contract file: the
+    gutting attempt is the verdict (exit 1), never masked by the environment
+    (exit 2). With a clean contract file the config error stays fatal.
+    """
+    try:
+        exit_code, output = _run_lint_imports(root)
+        return _pass_two_violations(exit_code, output)
+    except GateError:
+        if tolerate_config_error:
+            return []
+        raise
+
+
+def _honored_notices(table: dict[str, object]) -> list[str]:
+    return [
         f"ignored edge honored (enumerated, baseline-counted): {entry}"
         for entry in _ignore_entries(_contracts(table))
     ]
+
+
+def _run_gate(root: Path) -> int:
+    """Run all three passes, AGGREGATE their findings, then decide once.
+
+    No cross-pass fail-fast: PASS 1 (contract-file lint), PASS 2 (lint-imports),
+    and PASS 3 (the dynamic-import AST scan) each contribute their findings to
+    ONE verdict, so a single run shows every layering problem at once.
+    """
+    table = _load_contract_table(root)
+    if table is None:
+        return _missing_contract_verdict(root)
+    violations = lint_contract(root)
+    violations += _pass_two(root, tolerate_config_error=bool(violations))
+    violations += scan_dynamic_imports(root)
+    notices: list[str] = [] if violations else _honored_notices(table)
     return print_verdict(
-        "cf-import-contract",
-        scan_dynamic_imports(root),
-        notices=notices,
-        clean_summary=(
-            "cf-import-contract: OK (contract linted, lint-imports kept, no module-level "
-            "dynamic imports)"
-        ),
+        "cf-import-contract", violations, notices=notices, clean_summary=_CLEAN_SUMMARY
     )
 
 
