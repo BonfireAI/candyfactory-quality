@@ -16,11 +16,13 @@ vendored-copy-edit gaming vectors (law-candidates.md, Law 5 refuter).
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
 from cf_quality.errors import GateError
+from cf_quality.reporting import JSON_ENV_VAR
 from cf_quality.sticky_check import (
     MIRROR_HEADER,
     canonical_text,
@@ -429,3 +431,55 @@ def test_mount_refuses_on_declared_client_repo(tmp_path: Path) -> None:
         mount(repo / "CLAUDE.md")
     assert excinfo.value.code == "STICKY_MOUNT_CLIENT_MEMBRANE"
     assert not (repo / "CLAUDE.md").is_file()  # nothing was written
+
+
+# --- the structured wire form (CF_QUALITY_JSON opt-in, one GateVerdict schema) --
+#
+# Under the env opt-in the gate emits the canonical GateVerdict JSON the rest of
+# the battery already speaks, so cf-gate gets rich per-finding verdicts instead
+# of falling back to the bare exit code. The human-text default (asserted above)
+# is unchanged.
+
+
+def test_main_check_emits_gate_verdict_json_on_violations(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(JSON_ENV_VAR, "1")
+    repo = _repo_with(tmp_path, "# no law here\n")
+    code = main(["check", str(repo)])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert report["gate"] == "cf-sticky-check"
+    assert report["passed"] is False
+    assert report["exit_code"] == 1
+    assert report["error"] is None
+    assert report["violations"][0]["code"] == "STICKY_INTRO_ABSENT"
+    assert report["violations"][0]["severity"] == "error"
+
+
+def test_main_check_clean_emits_passing_verdict_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(JSON_ENV_VAR, "1")
+    repo = _repo_with(tmp_path, canonical_text())
+    code = main(["check", str(repo)])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert report["gate"] == "cf-sticky-check"
+    assert report["passed"] is True
+    assert report["violations"] == []
+
+
+def test_main_gate_error_emits_verdict_json_on_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(JSON_ENV_VAR, "1")
+    repo = _repo_with(tmp_path, None)
+    _declare_client(repo, value='"yes"')  # a tampered declaration: the gate cannot run
+    code = main(["check", str(repo)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""  # the wire form for a gate error lands on stderr
+    report = json.loads(captured.err)
+    assert report["exit_code"] == 2
+    assert report["error"]["code"] == "GATE_CONFIG_INVALID"
