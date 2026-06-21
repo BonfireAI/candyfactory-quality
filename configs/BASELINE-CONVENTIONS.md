@@ -57,20 +57,32 @@ watermark. A function at-or-below its watermark passes.
 **Boot (day one) — MANDATORY for any repo containing Python.** The gate
 REFUSES a Python repo with no `mypy-baseline.txt` (the 2026-06-10 refuter
 showed the old presence-conditioned skip made "0 new type errors" opt-in);
-a zero-error repo boots an empty baseline the same way.
+a zero-error repo boots an empty baseline the same way. This boot is the ONLY
+manual mypy command a consumer runs — once the baseline exists, `cf-gate` is the
+day-to-day command (it applies the identical mypy → normalize transform
+in-process; see below).
 
 ```bash
-mypy src --config-file mypy-base.toml | python -m cf_quality.mypy_normalize | mypy-baseline sync
+mypy <source-root> --config-file mypy-base.toml | python -m cf_quality.mypy_normalize | mypy-baseline sync
 git add mypy-baseline.txt          # commit the frozen debt + a dated shrink ticket
 ```
 
-The baseline normalizes line numbers to `:0`, so unrelated line drift cannot
-resurrect or duplicate findings.
+`<source-root>` is the tree the gate measures — the kit's resolved source root
+(`src/` when present, else the declared `[tool.cf-quality] source_root`; see
+`cf-repo-config source-root`). `mypy-base.toml` is the kit's pinned mypy gauge —
+the same config `cf-gate` loads from the installed kit, so the hand-synced
+baseline is gauged exactly as the gate will gauge it. The baseline normalizes
+line numbers to `:0`, so unrelated line drift cannot resurrect or duplicate
+findings.
 
-**Gate (every CI run):**
+**Gate (every CI run, via `cf-gate`):** `cf-gate`'s mypy stage runs the SAME
+`mypy <source-root> --config-file <kit cfg>` invocation, applies
+`cf_quality.mypy_normalize` in-process, and gates on `mypy-baseline filter`'s
+exit. The equivalent manual pipe — only the terminal verb changes, `sync` →
+`filter`:
 
 ```bash
-mypy src --config-file mypy-base.toml | python -m cf_quality.mypy_normalize | mypy-baseline filter
+mypy <source-root> --config-file mypy-base.toml | python -m cf_quality.mypy_normalize | mypy-baseline filter
 ```
 
 ### `cf_quality.mypy_normalize` — the env-independence filter (the deterministic-verdict fix)
