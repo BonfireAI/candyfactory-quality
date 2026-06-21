@@ -59,6 +59,13 @@ jobs:
         # snapshot, pytest), aggregates, and exits on the worst verdict; the
         # board is teed into the run log AND the step summary. NO
         # continue-on-error — the step's nonzero exit fails the job.
+        #
+        # The SHIPPED gauge is exercised end-to-end here, not only the inline
+        # pyproject mirror: cf-gate sources the packaged cf_quality/_configs/
+        # (ruff-base.toml + mypy-base.toml, declared mirrors of configs/*-base.toml),
+        # and its pytest stage runs tests/test_integration_consumer.py, which
+        # drives cf-gate again over a fixture consumer repo through that same
+        # packaged gauge (layout resolution + the mypy normalize->baseline pipe).
         run: |
           set +e
           {

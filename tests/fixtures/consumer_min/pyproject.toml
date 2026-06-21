@@ -1,0 +1,26 @@
+# A minimal but REAL consumer repo — END-TO-END fixture for cf-gate.
+#
+# This whole directory is TEST DATA, not kit source. The kit's own gate
+# type-checks (mypy) and complexity-grades (complexipy) only its resolved
+# source_root (src/), so app/widget.py is never measured as kit source. cf-gate's
+# ruff stage does lint the whole tree, so app/widget.py is kept ruff-clean and
+# ruff-formatted on purpose (it also inherits the tests/** S-rule per-file-ignores).
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "consumer-min"
+version = "0.0.0"
+requires-python = ">=3.12"
+
+[tool.cf-quality]
+# A NON-default source root: default discovery picks <repo>/src or the repo root,
+# and this fixture has neither a src/ dir nor source at the root — so resolving to
+# app/ proves cf-repo-config actually READ this committed declaration.
+source_root = "app"
+# client_repo waives the sticky-intro mount (the client membrane, ADR 0030 §11).
+# Sticky chrome is out of scope for this layout + mypy + config-from-wheel e2e, so
+# the fixture stays decoupled from the canonical sticky bytes while cf-gate's
+# sticky stage still resolves to a (clean) verdict via the membrane waiver.
+client_repo = true
