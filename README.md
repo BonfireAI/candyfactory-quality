@@ -1,5 +1,10 @@
 # candyfactory-quality — the gauge kit
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-5fd4c4)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12+-5fb8ff)](pyproject.toml)
+
+**One aggregating quality runner, so `local == CI`.** Observable, ratcheting, dogfooded — the gate every CandyFactory repo (and every Bonfire burn) runs against.
+
 The single shared quality gate for every CandyFactory repository. This kit is the
 executable half of **the BubbleGum Law** — *code keeps a measured shape, and the law
 that keeps it travels sticky*. Convention comes from the factory's gauge, not from
