@@ -352,7 +352,7 @@ def _pytest(layout: Layout, env: Mapping[str, str]) -> GateVerdict:
 
 
 def _stages() -> list[Stage]:
-    """The 12-stage battery (layout is stage 1, resolved before this list runs)."""
+    """The 13-stage battery (layout is stage 1, resolved before this list runs)."""
     return [
         Stage("ruff-check", _ruff_check),
         Stage("ruff-format", _ruff_format),
@@ -361,6 +361,7 @@ def _stages() -> list[Stage]:
         Stage("cf-mirror-check", _mirror_check),
         Stage("cf-recursion-check", _cf_source_scoped("cf-recursion-check")),
         Stage("cf-exemptions", _cf_runner("cf-exemptions")),
+        Stage("cf-no-bon-ref", _cf_runner("cf-no-bon-ref")),
         Stage("cf-import-contract", _cf_runner("cf-import-contract", "--root", ".")),
         Stage("mypy", _mypy),
         Stage("complexipy", _complexipy),

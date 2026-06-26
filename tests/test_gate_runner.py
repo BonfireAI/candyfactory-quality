@@ -89,6 +89,7 @@ def _clean_cf_responses() -> dict[str, tuple[int, str, str]]:
         "cf-file-budget",
         "cf-recursion-check",
         "cf-exemptions",
+        "cf-no-bon-ref",
         "cf-import-contract",
     )
     responses: dict[str, tuple[int, str, str]] = {
