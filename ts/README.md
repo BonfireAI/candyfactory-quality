@@ -16,8 +16,8 @@ Pre-existing offenders are frozen in a baseline (ratchet: shrink-only, never gro
 
 ## 4-step consumer mount
 
-These are exactly the steps SweetCRM Task 1 (BON-1701) follows when mounting
-the kit into a new TypeScript repository.
+These are exactly the steps the first SweetCRM mount follows when wiring the
+kit into a new TypeScript repository.
 
 ### Step 1 — Copy the consumer templates
 
