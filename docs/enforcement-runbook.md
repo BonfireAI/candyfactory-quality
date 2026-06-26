@@ -201,6 +201,30 @@ that fails the gate on a throwaway PR, confirm the run goes red AND the PR is
 then delete the branch. Settings can be correct while the name is subtly wrong —
 the behavioral canary is the only proof that a red verdict cannot land.
 
+### The in-band self-verifying canary (mechanism, not just procedure)
+
+The audit above is out-of-band (Constable cadence). The gate now **also verifies
+its own mount from inside every run**: `quality-gate.yml` runs
+`check-required-mount.sh` against the calling repo and **refuses to pass** when
+the gate is not a required, non-bypassable check — a gate that cannot prove it is
+the law is treated as unmounted. This is the Elegance Law's e2e on the gate
+itself; it closes the in-band leg of what DESIGN §4.8 listed as PARTIAL.
+
+It needs `administration: read`, so the caller stub grants it
+(`permissions: { contents: read, administration: read }`). A token that cannot
+read protection fails the canary with that remedy — never a silent pass.
+
+**The bootstrap order matters:** mount the protection FIRST (an admin action,
+out-of-band), then the gate goes green. The one-shot apply is:
+
+```bash
+bash templates/mount-required.sh OWNER/REPO          # full PUT + proves it via the audit
+```
+
+`mount-required.sh` always PUTs the complete protection object (the §2 trap:
+PATCH 404s on an unprotected branch), sets `enforce_admins: true` and
+`strict: true`, and then re-runs `check-required-mount.sh` to prove the mount.
+
 ---
 
 ## 4. Checklist
@@ -209,7 +233,9 @@ the behavioral canary is the only proof that a red verdict cannot land.
 2. GET current protection; save it (`§2a`).
 3. Author the full PUT body reproducing every captured field + the required
    checks block + `enforce_admins: true` (`§2b`); `restrictions: null` for
-   non-org repos.
+   non-org repos. (Or run `templates/mount-required.sh OWNER/REPO`.)
 4. PUT it; diff the echo against the saved copy (`§2c`).
 5. Run the canary audit — expect PASS (`§3`).
 6. Run the behavioral canary once — red verdict must be unmergeable (`§3`).
+7. Grant the caller `administration: read` so the in-band canary self-verifies
+   the mount on every run (`§3`).

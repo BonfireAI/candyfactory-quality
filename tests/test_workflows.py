@@ -294,3 +294,71 @@ def test_gate_self_assert_comment_matches_partial_verdict() -> None:
     # vector #1") versus DESIGN §4.8's honest PARTIAL.
     text = GATE_PATH.read_text(encoding="utf-8")
     assert "remain procedural" in text, "the self-assert comment must state the PARTIAL residue"
+
+
+# --- merged-main projection + in-band required-check self-verification --------
+
+
+def _gate_step(name_substr: str) -> dict[str, Any]:
+    for step in _steps(_load(GATE_PATH), "gate"):
+        if name_substr in step.get("name", ""):
+            return step
+    raise AssertionError(f"no gate step named like {name_substr!r}")
+
+
+def test_consumer_checkout_lands_pr_head_with_full_history() -> None:
+    # The battery must grade the PR HEAD (a SHA) merged with CURRENT base — not
+    # the default merge ref against a possibly-stale base. fetch-depth:0 gives
+    # the merge a real merge-base.
+    co = _gate_step("Checkout consumer repo")
+    assert str(co["with"]["fetch-depth"]) == "0"
+    assert "pull_request.head.sha" in co["with"]["ref"]
+
+
+def test_gate_projects_merged_main_state_on_pull_request() -> None:
+    step = _gate_step("Project the merged-main state")
+    assert step["if"] == "github.event_name == 'pull_request'"
+    run = step["run"]
+    assert "git merge" in run and "FETCH_HEAD" in run
+    assert "exit 1" in run, "an unmergeable PR is refused, not silently passed"
+    assert "BASE_REF" in step["env"], "base ref is read from env, never interpolated into the shell"
+
+
+def test_gate_self_verifies_required_mount_in_band() -> None:
+    # The Elegance e2e: the gate refuses to pass unless it can confirm it is a
+    # required, non-bypassable check — reusing the audit script (DRY).
+    canary = [
+        s for s in _steps(_load(GATE_PATH), "gate") if "check-required-mount.sh" in s.get("run", "")
+    ]
+    assert len(canary) == 1, "exactly one in-band mount canary"
+    assert "exit 1" in canary[0]["run"]
+    assert canary[0]["env"]["GH_TOKEN"], "the canary needs a token to read protection"
+
+
+def test_gate_declares_administration_read_permission() -> None:
+    perms = _load(GATE_PATH).get("permissions")
+    assert isinstance(perms, dict) and perms.get("administration") == "read"
+
+
+def test_still_exactly_one_aggregating_cf_gate_step_after_additions() -> None:
+    # The new projection + canary steps must NOT read as a second battery step.
+    steps = _steps(_load(GATE_PATH), "gate")
+    cf_steps = [s for s in steps if re.search(r"\bcf-gate\b", s.get("run", ""))]
+    assert len(cf_steps) == 1
+
+
+# --- caller stub + the apply/audit mount scripts -----------------------------
+
+
+def test_caller_grants_administration_read() -> None:
+    gate = _load(TEMPLATE_PATH)["jobs"]["gate"]
+    assert gate["permissions"]["administration"] == "read"
+
+
+def test_mount_apply_script_present_and_proves_via_audit() -> None:
+    apply = REPO / "templates" / "mount-required.sh"
+    assert apply.is_file(), "the apply-side mount script must ship beside the audit"
+    text = apply.read_text(encoding="utf-8")
+    assert "branches/${branch}/protection" in text, "the first mount is a full PUT of protection"
+    assert "enforce_admins" in text and "true" in text, "the mount must be non-bypassable"
+    assert "check-required-mount.sh" in text, "the apply script proves the mount via the audit"
