@@ -16,11 +16,18 @@ on:
 
 permissions:
   contents: read
-  # administration: read — the self-verifying mount canary (below) reads the
-  # default branch's protection to confirm THIS gate is a required, non-bypassable
-  # check. This is a CEILING; the effective grant comes from the caller's token, so
-  # the caller stub must also grant administration:read (templates/quality.caller.yml).
-  administration: read
+  # NOTE: `administration` is NOT a grantable GITHUB_TOKEN scope — a workflow
+  # `permissions:` block can only request the 15 documented automatic-token
+  # scopes (actions, attestations, checks, contents, deployments, discussions,
+  # id-token, issues, models, packages, pages, pull-requests, repository-projects,
+  # security-events, statuses), and declaring `administration:` here makes the
+  # workflow YAML invalid (the job dies at 0s and never emits a status check).
+  # So the in-band mount canary (below) reads the default branch's protection via
+  # an OPTIONAL `CI_KIT_TOKEN` secret — a fine-grained PAT / GitHub App
+  # installation token carrying repo Administration:read — forwarded by the
+  # caller's `secrets: inherit`. Absent that secret the canary is skipped with a
+  # warning and the required-check mount is enforced out-of-band (Constable sweep
+  # + templates/check-required-mount.sh).
 
 jobs:
   gate:
@@ -204,15 +211,27 @@ jobs:
         # procedure (DESIGN §4.8, verdict PARTIAL) into mechanism — the missing
         # in-band leg of the out-of-band Constable canary. It reuses the audit
         # script verbatim (DRY) against the calling repo's default branch; the
-        # context is `gate / gate`. Needs administration:read (see permissions +
-        # the caller stub); a token that cannot read protection is treated as
-        # an unmounted gate, not waved through.
+        # context is `gate / gate`.
+        #
+        # Reading branch protection needs repo Administration:read, which the
+        # automatic GITHUB_TOKEN CANNOT be granted (it is not a grantable token
+        # scope — see the permissions block above). So the canary's TEETH are
+        # active ONLY when an admin-scoped CI_KIT_TOKEN (fine-grained PAT /
+        # GitHub App installation token) is provisioned and forwarded via the
+        # caller's `secrets: inherit`. Without it the leg DEGRADES to a warning
+        # (so the gate is not bricked for un-provisioned consumers) and the mount
+        # stays enforced out-of-band (Constable sweep + check-required-mount.sh).
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CI_KIT_TOKEN || github.token }}
+          KIT_TOKEN: ${{ secrets.CI_KIT_TOKEN }}
         run: |
+          if [ -z "$KIT_TOKEN" ]; then
+            echo "::warning::quality-gate: in-band mount self-verification SKIPPED — no CI_KIT_TOKEN (admin:read) secret is provisioned, so the canary cannot read branch protection (the automatic GITHUB_TOKEN cannot be granted Administration:read). The out-of-band Constable sweep + templates/check-required-mount.sh remain the enforcement; provision a CI_KIT_TOKEN repo/org secret to give this leg teeth."
+            exit 0
+          fi
           script="$GITHUB_WORKSPACE/.cf-quality/templates/check-required-mount.sh"
           if ! bash "$script" "$GITHUB_REPOSITORY"; then
-            echo "::error::quality-gate refused: this gate is not a required, non-bypassable status check on the default branch — OR the token lacks 'administration: read' to confirm it. A gate that cannot prove it is the law is treated as unmounted. Mount it (templates/mount-required.sh · docs/enforcement-runbook.md) and grant the caller administration:read."
+            echo "::error::quality-gate refused: this gate is not a required, non-bypassable status check on the default branch — OR the provisioned CI_KIT_TOKEN lacks Administration:read to confirm it. A gate that cannot prove it is the law is treated as unmounted. Mount it (templates/mount-required.sh · docs/enforcement-runbook.md)."
             exit 1
           fi
 

@@ -13,10 +13,14 @@
 #     anyway. The status-check context is `gate / gate` (caller job `gate` over
 #     the reusable workflow's `gate` job). One-shot mount: templates/mount-required.sh;
 #     procedure + audit: docs/enforcement-runbook.md (also check-required-mount.sh)
-#   - grant `administration: read` below — the gate's in-band canary reads this
-#     repo's branch protection to self-verify it is mounted as required, and
-#     REFUSES to pass when it cannot confirm it (a gate that can't prove it is
-#     the law is treated as unmounted)
+#   - the gate's in-band mount canary is OPTIONAL: it reads this repo's branch
+#     protection to self-verify the gate is mounted as required, which needs repo
+#     Administration:read — a scope the automatic GITHUB_TOKEN cannot be granted.
+#     Enable it by providing a `CI_KIT_TOKEN` repo/org secret (a fine-grained PAT
+#     or GitHub App installation token with repo Administration: read); the
+#     `secrets: inherit` below forwards it to the reusable workflow. Without that
+#     secret the gate still runs and the required-check mount is enforced
+#     out-of-band (Constable sweep + templates/check-required-mount.sh)
 name: quality-gate
 on:
   push:
@@ -25,7 +29,7 @@ on:
     branches: [main]
 jobs:
   gate:
-    permissions: { contents: read, administration: read }
+    permissions: { contents: read }
     # Replace the placeholder with a real full commit SHA of the kit repo:
     uses: BonfireAI/candyfactory-quality/.github/workflows/quality-gate.yml@0000000000000000000000000000000000000000
     secrets: inherit

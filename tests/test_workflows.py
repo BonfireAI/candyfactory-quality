@@ -29,6 +29,29 @@ DOCTRINE_PATH = REPO / "docs" / "sha-pin-doctrine.md"
 
 SHA_PINNED = re.compile(r"@[0-9a-f]{40}$")
 
+# The exact set of scopes a workflow `permissions:` block may request for the
+# automatic GITHUB_TOKEN. `administration` is NOT among them (it is valid only
+# for fine-grained PATs / GitHub Apps), so declaring it makes the YAML invalid.
+VALID_GITHUB_TOKEN_PERMISSIONS = frozenset(
+    {
+        "actions",
+        "attestations",
+        "checks",
+        "contents",
+        "deployments",
+        "discussions",
+        "id-token",
+        "issues",
+        "models",
+        "packages",
+        "pages",
+        "pull-requests",
+        "repository-projects",
+        "security-events",
+        "statuses",
+    }
+)
+
 
 def _load(path: Path) -> dict[Any, Any]:
     # dict[Any, Any]: YAML 1.1 parses the bare trigger key ``on`` as the
@@ -66,6 +89,23 @@ def _walk_keys(node: Any) -> list[str]:
     elif isinstance(node, list):
         for item in node:
             keys.extend(_walk_keys(item))
+    return keys
+
+
+# recursion: bounded by the finite depth of a yaml.safe_load tree (acyclic by construction)
+def _permissions_keys(node: Any) -> set[str]:
+    """Union of the keys of every ``permissions:`` mapping anywhere in the tree
+    (top-level and per-job). A ``permissions`` value that is a bare string
+    (e.g. ``read-all``) contributes no scope keys."""
+    keys: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if str(key) == "permissions" and isinstance(value, dict):
+                keys.update(str(k) for k in value)
+            keys.update(_permissions_keys(value))
+    elif isinstance(node, list):
+        for item in node:
+            keys.update(_permissions_keys(item))
     return keys
 
 
@@ -335,9 +375,42 @@ def test_gate_self_verifies_required_mount_in_band() -> None:
     assert canary[0]["env"]["GH_TOKEN"], "the canary needs a token to read protection"
 
 
-def test_gate_declares_administration_read_permission() -> None:
+def _mount_canary() -> dict[str, Any]:
+    canary = [
+        s for s in _steps(_load(GATE_PATH), "gate") if "check-required-mount.sh" in s.get("run", "")
+    ]
+    assert len(canary) == 1, "exactly one in-band mount canary"
+    return canary[0]
+
+
+def test_mount_canary_reads_optional_ci_kit_token() -> None:
+    # The canary reads branch protection (Administration:read) via an OPTIONAL
+    # CI_KIT_TOKEN secret, falling back to the automatic token for the API host;
+    # KIT_TOKEN carries the secret alone so the run can test its presence.
+    env = _mount_canary()["env"]
+    gh_token = env["GH_TOKEN"]
+    assert "CI_KIT_TOKEN" in gh_token and "github.token" in gh_token
+    assert "secrets.CI_KIT_TOKEN" in env["KIT_TOKEN"]
+
+
+def test_mount_canary_degrades_without_admin_token() -> None:
+    # No admin token → skip-with-warning (degrade, never brick); token present →
+    # the strict proof reuses check-required-mount.sh and refuses on failure.
+    run = _mount_canary()["run"]
+    assert "::warning::" in run and '-z "$KIT_TOKEN"' in run
+    assert "check-required-mount.sh" in run and "exit 1" in run
+
+
+def test_gate_permissions_only_grant_valid_github_token_scopes() -> None:
+    # `administration` is not a grantable GITHUB_TOKEN scope; declaring it makes
+    # the workflow YAML invalid and the gate job dies at 0s without a status
+    # check. The gate's top-level permissions must stay within the valid set.
     perms = _load(GATE_PATH).get("permissions")
-    assert isinstance(perms, dict) and perms.get("administration") == "read"
+    assert isinstance(perms, dict)
+    keys = {str(k) for k in perms}
+    invalid = keys - VALID_GITHUB_TOKEN_PERMISSIONS
+    assert not invalid, f"non-grantable scope(s): {invalid}"
+    assert "administration" not in keys
 
 
 def test_still_exactly_one_aggregating_cf_gate_step_after_additions() -> None:
@@ -350,9 +423,21 @@ def test_still_exactly_one_aggregating_cf_gate_step_after_additions() -> None:
 # --- caller stub + the apply/audit mount scripts -----------------------------
 
 
-def test_caller_grants_administration_read() -> None:
+def test_caller_permissions_only_grant_valid_github_token_scopes() -> None:
     gate = _load(TEMPLATE_PATH)["jobs"]["gate"]
-    assert gate["permissions"]["administration"] == "read"
+    keys = {str(k) for k in gate["permissions"]}
+    invalid = keys - VALID_GITHUB_TOKEN_PERMISSIONS
+    assert not invalid, f"non-grantable scope(s): {invalid}"
+    assert "administration" not in keys
+
+
+def test_no_workflow_declares_administration_token_scope() -> None:
+    # Regression guard: `administration` is not a grantable GITHUB_TOKEN scope, so
+    # it must appear in NO permissions mapping (top-level or per-job) of any of
+    # our workflow surfaces. This FAILS on the pre-fix files and PASSES after.
+    for path in (GATE_PATH, SELF_CI_PATH, TEMPLATE_PATH):
+        keys = _permissions_keys(_load(path))
+        assert "administration" not in keys, f"{path.name} declares non-grantable 'administration'"
 
 
 def test_mount_apply_script_present_and_proves_via_audit() -> None:
