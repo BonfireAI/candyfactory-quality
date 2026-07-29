@@ -166,7 +166,50 @@ def test_baseline_conventions_documents_observed_workflows() -> None:
     assert "--snapshot-create" in text  # complexipy watermark boot
     assert "mypy-baseline sync" in text  # type-debt baseline boot
     assert "mypy-baseline filter" in text  # CI-side set-difference gate
-    assert "does NOT auto-shrink" in text  # the complexipy re-snapshot duty
+    # 2026-07-28: this line used to pin the substring "does NOT auto-shrink",
+    # which is FALSE for the pinned complexipy 5.6.0 — a PASSING compare calls
+    # create_snapshot_file on handle_snapshot_watermark's no-violation branch and
+    # was observed rewriting a populated snapshot to []. The assertion was
+    # therefore gating a false sentence into the document. It is replaced, not
+    # softened: where one substring pinned one (wrong) claim, four now pin the
+    # whole corrected contract — the measured write behaviour, its evidence, the
+    # write-free measurement that disarms it, and the operator duty that survived
+    # it. Delete any one of those teachings from the doc and this test fails.
+    assert "A passing plain-run compare REWRITES the snapshot" in text  # measured on 5.6.0
+    assert "handle_snapshot_watermark" in text  # the destructive call site, named
+    assert "--snapshot-ignore" in text  # the write-free measurement the gate mounts
+    assert "The re-snapshot duty is still yours" in text  # the surviving shrink duty
+
+
+def test_baseline_conventions_teaches_the_config_that_can_defeat_the_gate() -> None:
+    # 2026-07-28, second correction: `--snapshot-ignore` alone does NOT make the run
+    # write-free. `snapshot-create` is a separate branch resolved CLI-first/TOML-
+    # second with no negating flag, so a consumer's own complexipy config could put
+    # the rewrite back while the gate graded pre-write bytes. A consumer cannot
+    # comply with a refusal they were never told about, so the mount doc must carry
+    # the key list, the refusal, and the two options that ARE honoured.
+    text = (CONFIGS_DIR / "BASELINE-CONVENTIONS.md").read_text(encoding="utf-8")
+    assert "GATE_COMPLEXIPY_CONFIG_DEFEATS_MEASUREMENT" in text
+    assert "snapshot-create" in text and "ignore-complexity" in text and "output-format" in text
+    assert "max-complexity-allowed" in text, "the threshold the kit deliberately honours"
+    assert "GATE_COMPLEXIPY_THRESHOLD_RAISED" in text, "raising the bar refuses, not passes"
+    assert "GATE_COMPLEXIPY_INSTRUMENT_FAILED" in text, "a tool failure is not the repo's"
+
+
+def test_baseline_conventions_cannot_reacquire_the_false_unmeasured_claim() -> None:
+    # A doc fix pass on this branch asserted that "an improvement that empties a floor
+    # file of functions … FAILS (COMPLEXIPY_SNAPSHOT_FILE_UNMEASURED)". That is FALSE:
+    # `--plain` without `--failed` lists every measured function regardless of
+    # threshold (complexipy/utils/output.py:234,243), so such a file stays in
+    # census.files and the gate is GREEN. UNMEASURED fires when the file was not
+    # MEASURED; the per-FUNCTION code is what catches a single lost function. This rod
+    # bites in both directions: the true rule must be stated, and the false phrasing
+    # must not come back.
+    for name in ("BASELINE-CONVENTIONS.md",):
+        text = (CONFIGS_DIR / name).read_text(encoding="utf-8")
+        assert "empties a floor file of functions" not in text, f"{name}: the false claim is back"
+        assert "COMPLEXIPY_SNAPSHOT_FUNCTION_UNMEASURED" in text, "the per-function rule"
+        assert "was not **measured** at all" in text, "the true trigger, spelled out"
 
 
 def test_ruff_base_gates_blanket_and_unused_noqa() -> None:

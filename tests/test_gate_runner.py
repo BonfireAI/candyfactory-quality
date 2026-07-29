@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from cf_quality import gate_runner
+from cf_quality.complexipy_measure import measurement_argv
 from cf_quality.errors import GateError, GateVerdict, GateViolation
 from cf_quality.gate_runner import battery_exit_code, run_battery
 from cf_quality.import_contract import main as import_contract_main
@@ -475,25 +476,24 @@ def test_complexipy_targets_source_root_in_unpiped_write_free_processes(
 ) -> None:
     # With the snapshot present, complexipy measures the resolved source_root in
     # UNPIPED processes — piping it (as the mypy stage pipes through the filter)
-    # would mask its exit code (the tool-spike defect this rod fences off). It is
-    # also invoked WRITE-FREE: `--snapshot-ignore` and never `--snapshot-create`
-    # are the only two flags that keep the pinned tool away from
-    # `create_snapshot_file`, which its own green compare path calls (see
-    # cf_quality.complexipy_ratchet). Two measurements, one per question the
-    # ratchet asks; the empty census here is legitimate (no src/, nothing to grade).
+    # would mask its exit code (the tool-spike defect this rod fences off). BOTH
+    # argvs are now asserted EXHAUSTIVELY against measurement_argv, in order: the
+    # three-flag allowlist that stood here pinned what IS present and nothing
+    # about what is not, so `-mx 100` could join this argv with every test still
+    # green — and that flag empties the offender set outright, which is the
+    # vacuity vector this rung exists to close.
     _write(tmp_path, "complexipy-snapshot.json", "[]")
     calls: list[tuple[list[str], str | None]] = []
     _record_calls(monkeypatch, calls)
-    layout = _layout(tmp_path)
-
-    verdict = gate_runner._complexipy(layout, {})
+    tool = Path("/fake") / "complexipy"
+    # py_present=False is the honest fixture: tmp_path holds no .py at all, so an
+    # empty census is an empty WORLD, not the void the vacuity leg must refuse.
+    verdict = gate_runner._complexipy(_layout(tmp_path, py_present=False), {})
 
     assert verdict is not None and verdict.passed
-    assert len(calls) == 2, "the census run and the offender run — nothing else"
-    for argv, stdin in calls:
-        assert argv[:2] == [str(Path("/fake") / "complexipy"), str(tmp_path / "src")]
-        assert "--snapshot-ignore" in argv, "the committed floor must be out of reach"
-        assert "--snapshot-create" not in argv, "the gate never writes the artifact it grades"
-        assert "--plain" in argv, "the census is parsed, so it rides the scripting form"
-        assert stdin is None, "no stdin handoff like the mypy filter pipe"
-    assert ["--failed" in argv for argv, _ in calls] == [False, True], "census, then offenders"
+    assert [argv for argv, _ in calls] == [
+        measurement_argv(tool, tmp_path / "src", offenders_only=offenders)
+        for offenders in (False, True)
+    ], "census then offenders, each argv exact — an allowlist would let -mx 100 in"
+    assert not {"-mx", "--max-complexity-allowed"} & set(calls[0][0]), "no kit-side budget"
+    assert [stdin for _, stdin in calls] == [None, None], "no stdin handoff like mypy's"

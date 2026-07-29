@@ -21,12 +21,18 @@ measured census) and cannot be silently destroyed. The control rods:
 - RED on a real **complexity regression** — a new offender, and a rise above a
   committed watermark;
 - RED on a **vacuous** run — a census of zero functions can never report clean,
-  with a second leg (the tree demonstrably defines functions) so the refusal
+  with a second leg (the caller's repo-wide ``py_present``) so the refusal
   survives an already-emptied floor;
 - GREEN on an **unchanged** floor, on a **legitimate non-empty shrink**, and on a
   genuinely clean repo whose floor is ``[]``;
 - the **write-free** proof at the argv altitude, plus the measured COUNT riding
   every finding so no verdict can be read without the measurement behind it.
+
+Two sibling files carry what this one is not about: ``test_complexipy_instrument.py``
+(the consumer config that can defeat the measurement, the exit-code/stderr triage,
+the env pins, and the live mirror-pin against the installed ``normalize_path``) and
+``test_complexipy_ratchet_rules.py`` (the threshold-free vacuity closures, the
+per-function surface audit, and duplicate ``(path, name)`` keys).
 
 The external tool is faked at the established subprocess seam
 (``gate_runner._exec`` / ``gate_runner._tool``, through ``test_gate_runner``'s
@@ -40,15 +46,16 @@ subprocess at all, which is the whole point of moving the comparison here.
 from __future__ import annotations
 
 import json
-import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 from test_gate_runner import _clean_cf_responses, _install_fakes, _layout, _write
 
-from cf_quality import complexipy_ratchet, gate_runner
-from cf_quality.complexipy_ratchet import Census, grade, measurement_argv, read_snapshot
+from cf_quality import complexipy_measure, gate_runner
+from cf_quality.complexipy_floor import read_snapshot
+from cf_quality.complexipy_measure import Census, measurement_argv
+from cf_quality.complexipy_ratchet import grade
 from cf_quality.errors import GateError, GateVerdict
 
 #: Module text that merely EXISTS and defines a function. Every complexity in this
@@ -85,10 +92,10 @@ def _census(*rows: tuple[str, str, int]) -> str:
 def _measured(census: str, offenders: str) -> dict[str, tuple[int, str, str]]:
     """The clean board with complexipy's two write-free runs answered explicitly.
 
-    The offender run's exit code is 1 whenever it reports anything, and it is
-    deliberately irrelevant: with the compare switched off complexipy's status
-    only restates "something is over threshold", the normal state of a repo
-    carrying a baselined floor.
+    Exit 1 whenever a run reports offenders, 0 otherwise — the tool's real
+    semantics, which the gate now CROSS-CHECKS rather than discards: an empty
+    ``--failed`` census beside a non-zero exit is a contradiction, and that is the
+    offender run's vacuity leg (its rod lives in test_complexipy_instrument.py).
     """
     responses = _clean_cf_responses()
     responses["complexipy"] = (0, census, "")
@@ -360,49 +367,16 @@ def test_clean_repo_with_an_empty_floor_is_clean(
 
 def test_measurement_argv_can_never_write_the_committed_floor() -> None:
     # The pinned tool reaches `create_snapshot_file` from exactly two places:
-    # `--snapshot-create`, and the watermark compare's success path that
-    # `--snapshot-ignore` switches off. Both flags are load-bearing, both runs.
-    for offenders_only in (False, True):
-        argv = measurement_argv(
-            Path("/fake/complexipy"), Path("/repo/src"), offenders_only=offenders_only
-        )
-        assert argv[:2] == ["/fake/complexipy", "/repo/src"]
-        assert "--snapshot-ignore" in argv, "the compare — and its rewrite — stays off"
-        assert "--snapshot-create" not in argv, "the gate never writes the artifact it grades"
-        assert "--plain" in argv, "the census must be machine-readable to be graded"
-        assert ("--failed" in argv) is offenders_only
+    # `--snapshot-create` (whose TOML twin complexipy_measure.audit_config refuses,
+    # because argv cannot negate it) and the watermark compare's success path that
+    # `--snapshot-ignore` switches off. EXHAUSTIVE literal equality, not a flag
+    # allowlist: the allowlist that stood here bit on REMOVING --snapshot-ignore
+    # but NOT on ADDING `-mx 100`, which empties the offender set outright.
+    tool, source_root = Path("/fake/complexipy"), Path("/repo/src")
+    base = ["/fake/complexipy", "/repo/src", "--plain", "--color", "no", "--snapshot-ignore"]
 
-
-def test_measurement_runs_pin_columns_so_the_census_cannot_wrap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # rich wraps at 80 columns when stdout is not a terminal, and a wrapped census
-    # row is an UNPARSEABLE census row — the gate would refuse a healthy repo, or
-    # (worse, in a laxer parser) read a narrower world. COLUMNS is load-bearing.
-    row = _light(tmp_path)
-    _snapshot(tmp_path)
-    seen: list[dict[str, str]] = []
-
-    def recording_exec(
-        argv: list[str],
-        cwd: Path,
-        env: Mapping[str, str],
-        *,
-        stdin: str | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        seen.append(dict(env))
-        return subprocess.CompletedProcess(argv, 0, _census(row), "")
-
-    monkeypatch.setattr(gate_runner, "_tool", lambda name: Path("/fake") / name)
-    monkeypatch.setattr(gate_runner, "_exec", recording_exec)
-
-    gate_runner._complexipy(_layout(tmp_path), {"PATH": "/usr/bin"})
-
-    assert len(seen) == 2, "the census run and the offender run"
-    for env in seen:
-        assert int(env["COLUMNS"]) >= 1000, "an 80-column wrap would break the census parse"
-        assert env["PYTHONIOENCODING"] == "utf-8", "the census decodes UTF-8, never by locale"
-        assert env["PATH"] == "/usr/bin", "the caller's environment survives the overlay"
+    assert measurement_argv(tool, source_root, offenders_only=False) == base
+    assert measurement_argv(tool, source_root, offenders_only=True) == [*base, "--failed"]
 
 
 def test_the_committed_floor_is_only_ever_read(
@@ -433,9 +407,9 @@ def test_grade_is_a_pure_function_of_the_floor_and_the_census(tmp_path: Path) ->
     # and no green run can destroy it. Every finding carries the measured tally.
     _write(tmp_path, "src/heavy.py", A_FUNCTION)
     floor = {("src/heavy.py", "heavy"): 20}
-    census = Census(functions={("src/heavy.py", "heavy"): 31})
+    census = Census(functions={("src/heavy.py", "heavy"): 31}, rows=1)
 
-    verdict = grade(tmp_path, tmp_path / "src", floor, census, census)
+    verdict = grade(_layout(tmp_path), floor, census, census)
 
     assert _codes(verdict) == ["COMPLEXIPY_WATERMARK_REGRESSION"]
     assert verdict.violations[0].context["measured_functions"] == 1
@@ -474,7 +448,7 @@ def test_read_snapshot_keys_the_observed_on_disk_shape(tmp_path: Path) -> None:
 def test_census_parser_survives_a_path_containing_spaces() -> None:
     # `--plain` is space-separated, so the parse must split from the RIGHT: the
     # complexity and the function name are single tokens, a path is not.
-    census = complexipy_ratchet.parse_census("src/odd dir/mod.py Klass::method 12\n")
+    census = complexipy_measure.parse_census("src/odd dir/mod.py Klass::method 12\n")
 
     assert census.functions == {("src/odd dir/mod.py", "Klass::method"): 12}
     assert census.files == frozenset({"src/odd dir/mod.py"})

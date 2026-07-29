@@ -1,9 +1,13 @@
 # Baseline conventions — mounting the ratchet on a consumer repo
 
 How a repo boots green-by-construction on day one and then only ever shrinks.
-Every workflow below is the **observed** behavior of the pinned tools
-(complexipy 5.5.0 · mypy-baseline 0.7.4), measured in `docs/tool-spikes.md` —
-not read off a README. Every baseline carries a dated ratchet ticket so
+Every workflow below is the **observed** behavior of the pinned tools, measured
+in `docs/tool-spikes.md` — not read off a README. Version provenance, stated
+because a stale label is exactly how a false claim survives here: the spike was
+run on **complexipy 5.5.0 · mypy-baseline 0.7.4**; mypy-baseline is still pinned
+at 0.7.4, but complexipy is now pinned at **5.6.0** and only its
+snapshot-**write** semantics have been re-measured there (2026-07-28 — the first
+complexipy gotcha below). Every baseline carries a dated ratchet ticket so
 green-by-baseline cannot become green-forever (the Law-1 refuter's expiry fix).
 
 ## The shared configs in this directory
@@ -31,26 +35,90 @@ Exit 0 even when offenders exist — baseline boot is green by construction.
 The snapshot records only functions over the threshold; an all-clean tree
 writes a literal `[]`.
 
-**Gate (every CI run, from the repo root):**
+**Gate (every CI run, from the repo root) — `cf-gate`, never the tool's own
+compare:**
 
 ```bash
-complexipy src            # plain run auto-compares when the snapshot exists
+cf-gate                   # the complexipy stage measures write-free, grades in-kit
 ```
 
 Fails (exit 1) on any NEW offender, or any baselined offender rising above its
-watermark. A function at-or-below its watermark passes.
+watermark — complexipy's own rule, applied by `cf_quality.complexipy_ratchet`
+over a floor the tool is never allowed to touch. A function at-or-below its
+watermark passes. Do **not** mount a bare `complexipy src` as the gate; the first
+gotcha is why.
 
 **Observed gotchas the mount must respect:**
 
-- The snapshot **does NOT auto-shrink**. After an improvement the plain run
-  passes but the file still holds the old watermark — a later regression back
-  up to the stale watermark would pass. The kit owns the re-baseline step:
-  re-run `--snapshot-create` on merge (or in the shrink ticket) to lock
-  improvements in.
-- Run from the **repo root** so the committed snapshot is the one compared
-  (snapshot path is CWD-relative).
-- Never pipe the gate command (`complexipy … | tail` masks the exit code);
-  gate on the command's own status, or set `pipefail`.
+- **A passing plain-run compare REWRITES the snapshot** — measured on the pinned
+  **complexipy 5.6.0** (2026-07-28), correcting the 5.5.0 entry that used to
+  stand here and claim the file never shrinks itself. The destructive call site is
+  `complexipy/utils/snapshot.py::handle_snapshot_watermark`, which calls
+  `create_snapshot_file(...)` on its **no-violation** branch — the tool's green
+  path is its write path. Reproduced twice at exit 0, a populated snapshot
+  rewritten to `[]`: once by grading a path narrower than the floor describes,
+  once by raising the threshold above every function. Committed, either one
+  deletes the watermark forever behind a green run. `cf-gate` therefore measures
+  write-free with `--plain --color no --snapshot-ignore` (verified on 5.6.0 to
+  leave the file byte-unchanged) and grades the ratchet itself.
+- **Your own `complexipy` config can defeat the gate, so the gate REFUSES instead
+  of measuring through it.** `--snapshot-ignore` disarms the compare's rewrite, but
+  `snapshot-create` is a **separate branch** (`main.py:323`) resolved CLI-first,
+  TOML-second (`utils/toml.py:235-240`) — and `--snapshot-create` has no negating
+  flag, so `cf-gate` cannot override it from the command line. So a
+  `complexipy.toml` / `.complexipy.toml` / `[tool.complexipy]` carrying any of
+  `snapshot-create`, `quiet`, `ratchet`, `failed`, `details = "low"`,
+  `ignore-complexity`, `report-ignored`, `output`, `output-format`, or the legacy
+  `output-csv|json|gitlab|sarif` fails the stage typed, naming the key and the file
+  (`GATE_COMPLEXIPY_CONFIG_DEFEATS_MEASUREMENT`, exit 2). **Remove the key** — there
+  is no workaround to reach for, because the two you actually want are already
+  honoured: `max-complexity-allowed` (your threshold — the kit declares none of its
+  own) and `exclude` (your surface). `no-ignore`, `check-script` and `sort` are
+  honoured too. An unparseable config is also a refusal
+  (`GATE_COMPLEXIPY_CONFIG_UNREADABLE`) — unreadable is not absent.
+- **Raising `max-complexity-allowed` above a committed watermark fails the gate**
+  (`GATE_COMPLEXIPY_THRESHOLD_RAISED`, exit 2) rather than quietly grading an empty
+  offender set. If you mean to raise the bar, raise it and **re-boot the floor at
+  the new threshold** in the same commit, so the floor and the bar agree.
+- **The re-snapshot duty is still yours, in a narrower shape.** With the write
+  disarmed the floor holds still, which means a shrink is not locked in merely by
+  passing: the watermark rule is a `>` bound, so a function that got simpler and
+  later climbs back to its stale watermark passes. Re-run
+  `complexipy <source-root> --snapshot-create` from the repo root, deliberately,
+  and commit it — that is the shrink ticket's job. What is MECHANICAL now, stated
+  exactly (an earlier draft of this file claimed a floor file emptied of functions
+  fails — it does **not**: `--plain` lists every measured function regardless of
+  threshold, so a file whose functions all dropped below the bar is still measured
+  and still green):
+  - a floor file that exists but was not **measured** at all — excluded,
+    ignore-commented, outside the surface, or now functionless — fails
+    (`COMPLEXIPY_SNAPSHOT_FILE_UNMEASURED`);
+  - a floor file outside the graded source root fails
+    (`COMPLEXIPY_SURFACE_NARROWED`);
+  - a floor **function** missing from a file that WAS measured fails
+    (`COMPLEXIPY_SNAPSHOT_FUNCTION_UNMEASURED`) — that is the shape a
+    `# complexipy: ignore` comment takes, and it is an unregistered exemption from
+    this gate, so it is refused rather than absorbed;
+  - a run that measured **zero functions** can no longer report clean while the
+    floor names functions or the repo contains Python at all
+    (`GATE_COMPLEXIPY_MEASURED_NOTHING`).
+
+  Every one of those messages names the re-boot command as its remedy. Still on you,
+  not on the gate: a wholly deleted floor file is a legitimate improvement and stays
+  green, so the snapshot keeps dead entries until a re-boot clears them — and a floor
+  someone zeroes by hand and commits is green too, visible only as a
+  `complexipy-snapshot.json` diff in review.
+- Run the **boot** from the **repo root** so the snapshot lands beside the code it
+  describes (its path is CWD-relative, and the gate reads it from the repo root).
+- Never pipe a hand-run complexipy command (`complexipy … | tail` masks the exit
+  code). `cf-gate` runs it with a fixed argv and no shell, and does not *grade* on
+  its exit code — but it does **cross-check** it: 0 and 1 are the tool's only
+  verdicts, 1 being the ordinary "some function is over threshold", so exit 1 with an
+  empty census, or any other non-zero code, is the instrument failing and refuses
+  distinctly (`GATE_COMPLEXIPY_INSTRUMENT_FAILED`, carrying the exit code and a
+  stderr excerpt) instead of being charged to your code. A file complexipy cannot
+  parse likewise refuses (`GATE_COMPLEXIPY_PATHS_UNMEASURABLE`, exit 2, not exit 1):
+  a narrower surface than the tree makes every other clean reading unsupported.
 
 ## 2. mypy-baseline — the 0-new-type-errors gate (multiset set-difference)
 
