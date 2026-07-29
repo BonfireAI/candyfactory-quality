@@ -204,7 +204,10 @@ def test_one_run_reports_every_failing_gate(
 ) -> None:
     # Red four ways at once: a ruff finding, a file-budget overrun, a mypy
     # regression, and a failing test. cf-gate must surface ALL four in ONE run.
-    _write(tmp_path, "pkg.py", "x = 1\n")
+    # pkg.py carries a FUNCTION (not a bare assignment) because the complexipy
+    # stage now refuses a surface with nothing to grade (tests/
+    # test_complexipy_snapshot.py) — a zero-function room could not report clean.
+    _write(tmp_path, "pkg.py", "def one() -> int:\n    return 1\n")
     _write(tmp_path, "mypy-baseline.txt", "")
     _write(tmp_path, "complexipy-snapshot.json", "{}")
     responses = _clean_cf_responses()
@@ -283,7 +286,9 @@ def test_mypy_gates_on_filter_exit_not_mypy_exit(
 ) -> None:
     # mypy itself exits non-zero (baselined debt exists) but mypy-baseline
     # filter exits 0 (no NEW errors) — the verdict must ride the filter.
-    _write(tmp_path, "pkg.py", "x = 1\n")
+    # The function (not a bare assignment) keeps the complexipy stage's surface
+    # non-vacuous, so this test grades the mypy pipe and nothing else.
+    _write(tmp_path, "pkg.py", "def one() -> int:\n    return 1\n")
     _write(tmp_path, "mypy-baseline.txt", "")
     _write(tmp_path, "complexipy-snapshot.json", "{}")
     responses = _clean_cf_responses()
@@ -467,6 +472,9 @@ def test_complexipy_targets_source_root_in_one_unpiped_process(
     # With the snapshot present, complexipy grades the resolved source_root as a
     # SINGLE process — piping it (as the mypy stage pipes through the filter)
     # would mask its exit code (the tool-spike defect this rod fences off).
+    # src/ carries a real function so the stage's vacuity guard (which refuses a
+    # surface with nothing to grade) is satisfied and this rod still measures argv.
+    _write(tmp_path, "src/mod.py", "def one() -> int:\n    return 1\n")
     _write(tmp_path, "complexipy-snapshot.json", "{}")
     calls: list[tuple[list[str], str | None]] = []
     _record_calls(monkeypatch, calls)
