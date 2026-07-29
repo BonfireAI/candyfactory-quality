@@ -135,6 +135,12 @@ class TestGateVerdict:
         assert verdict.exit_code == 2
 
     def test_to_dict_composes_the_part_wire_forms(self) -> None:
+        # `notices` and `evidence` were APPENDED (2026-07-28), the same way
+        # GateViolation gained severity/fixable: a PASSING gate carried no
+        # measurement in its wire form, so a machine reading the aggregated JSON
+        # could not tell a clean grade from one that measured nothing — which is
+        # the whole discrimination a ratchet exists to make. Both default empty,
+        # so every existing construction is untouched; the key set grows.
         violation = GateViolation(code="C", message="m", path="p.py", line=2)
         error = GateError(code="GATE_X", message="boom", context={"k": "v"})
         verdict = GateVerdict(gate="cf-x", violations=[violation], error=error)
@@ -144,10 +150,30 @@ class TestGateVerdict:
             "exit_code": 2,
             "error": error.to_dict(),
             "violations": [violation.to_dict()],
+            "notices": [],
+            "evidence": {},
         }
 
     def test_clean_to_dict_has_null_error_and_stable_keys(self) -> None:
         verdict = GateVerdict(gate="cf-x", violations=[])
         report = verdict.to_dict()
         assert report["error"] is None
-        assert set(report) == {"gate", "passed", "exit_code", "error", "violations"}
+        assert set(report) == {
+            "gate",
+            "passed",
+            "exit_code",
+            "error",
+            "violations",
+            "notices",
+            "evidence",
+        }
+
+    def test_evidence_and_notices_ride_the_wire_form_on_a_pass(self) -> None:
+        # The rod on the append above: a clean verdict must be able to CARRY its
+        # measurement, not merely have somewhere to put it.
+        verdict = GateVerdict(
+            gate="complexipy", violations=[], notices=["— measured 2"], evidence={"n": 2}
+        )
+        report = verdict.to_dict()
+        assert report["passed"] is True
+        assert report["notices"] == ["— measured 2"] and report["evidence"] == {"n": 2}

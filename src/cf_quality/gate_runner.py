@@ -37,6 +37,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from cf_quality.complexipy_ratchet import complexipy_verdict
 from cf_quality.errors import GateError, GateVerdict, GateViolation
 from cf_quality.mypy_normalize import normalize_mypy_stdout
 from cf_quality.repo_config import (
@@ -321,7 +322,7 @@ def _mypy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
 
 
 def _complexipy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
-    """complexipy through the snapshot ratchet; same refuse/skip doctrine as mypy."""
+    """complexipy WRITE-FREE (its compare REWRITES the floor) — refuse/skip as mypy's."""
     if not (layout.root / "complexipy-snapshot.json").is_file():
         return _ratchet_skip_or_refuse(
             layout,
@@ -329,8 +330,7 @@ def _complexipy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
             "complexipy-snapshot.json",
             "boot the snapshot (complexipy <source-root> --snapshot-create), even when clean",
         )
-    argv = [str(_tool("complexipy")), str(layout.source_root)]
-    return _run_external("complexipy", argv, cwd=layout.root, env=env)
+    return complexipy_verdict(layout, env, _tool("complexipy"), _exec)
 
 
 def _ratchet_skip_or_refuse(
@@ -449,11 +449,11 @@ def _gate_detail(verdict: GateVerdict) -> list[str]:
 
 
 def _emit_human(agg: _Aggregate) -> None:
-    """One status line per gate, then full detail for EVERY failing gate."""
+    """One status line per gate (with its notices — a PASS must show what it measured)."""
     failing = [verdict for verdict in agg.verdicts if not verdict.passed]
     for verdict in agg.verdicts:
         status = "PASS" if verdict.passed else "FAIL"
-        print(f"{status}  {verdict.gate}")
+        print(f"{status}  {verdict.gate}", *verdict.notices)
     if not failing:
         print(f"\n{RUNNER_GATE}: PASS — every gate is clean")
         return

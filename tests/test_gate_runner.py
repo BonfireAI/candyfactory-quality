@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from cf_quality import gate_runner
+from cf_quality.complexipy_measure import measurement_argv
 from cf_quality.errors import GateError, GateVerdict, GateViolation
 from cf_quality.gate_runner import battery_exit_code, run_battery
 from cf_quality.import_contract import main as import_contract_main
@@ -52,10 +53,16 @@ def _violation(code: str, message: str, path: str) -> GateViolation:
 
 
 def _response_key(argv: Sequence[str]) -> str:
-    """Map a stage's argv back to its response key (ruff has two stages)."""
+    """Map a stage's argv back to its response key (ruff and complexipy each run twice).
+
+    complexipy runs write-free TWICE — the ``--plain`` census, then the ``--failed``
+    offender subset its OWN threshold selects — keyed apart like ruff's two stages.
+    """
     name = Path(argv[0]).name
     if name == "ruff":
         return "ruff-format" if "format" in argv else "ruff-check"
+    if name == "complexipy":
+        return "complexipy-offenders" if "--failed" in argv else "complexipy"
     return name
 
 
@@ -96,6 +103,10 @@ def _clean_cf_responses() -> dict[str, tuple[int, str, str]]:
         "ruff-check": (0, "", ""),
         "ruff-format": (0, "", ""),
         "pytest": (0, "", ""),
+        # A census that MEASURED something plus an empty offender subset: the stage
+        # grades the snapshot ratchet itself now, and a zero census is a void.
+        "complexipy": (0, "pkg.py greet 1\n", ""),
+        "complexipy-offenders": (0, "", ""),
     }
     for gate in cf_gates:
         responses[gate] = (0, _verdict_json(gate), "")
@@ -206,7 +217,7 @@ def test_one_run_reports_every_failing_gate(
     # regression, and a failing test. cf-gate must surface ALL four in ONE run.
     _write(tmp_path, "pkg.py", "x = 1\n")
     _write(tmp_path, "mypy-baseline.txt", "")
-    _write(tmp_path, "complexipy-snapshot.json", "{}")
+    _write(tmp_path, "complexipy-snapshot.json", "[]")
     responses = _clean_cf_responses()
     responses["ruff-check"] = (1, "pkg.py:1:1: E501 line too long", "")
     responses["cf-file-budget"] = (
@@ -219,7 +230,6 @@ def test_one_run_reports_every_failing_gate(
     )
     responses["mypy"] = (1, "pkg.py: error: bad", "")
     responses["mypy-baseline"] = (1, "pkg.py: error: bad (new over baseline)", "")
-    responses["complexipy"] = (0, "", "")
     responses["pytest"] = (1, "1 failed, 0 passed", "")
     _install_fakes(monkeypatch, responses)
 
@@ -285,11 +295,10 @@ def test_mypy_gates_on_filter_exit_not_mypy_exit(
     # filter exits 0 (no NEW errors) — the verdict must ride the filter.
     _write(tmp_path, "pkg.py", "x = 1\n")
     _write(tmp_path, "mypy-baseline.txt", "")
-    _write(tmp_path, "complexipy-snapshot.json", "{}")
+    _write(tmp_path, "complexipy-snapshot.json", "[]")
     responses = _clean_cf_responses()
     responses["mypy"] = (1, "pkg.py: error: baselined debt", "")
     responses["mypy-baseline"] = (0, "", "")
-    responses["complexipy"] = (0, "", "")
     _install_fakes(monkeypatch, responses)
 
     verdicts = run_battery(tmp_path, {})
@@ -379,7 +388,8 @@ def test_import_contract_aggregates_passes_into_one_verdict(
 # actually run: ruff rides the derived known-first-party; that first-party set
 # is the SAME one cf-repo-config resolves; complexipy refuses a Python repo
 # with no snapshot, skips a Python-free one visibly, and targets the resolved
-# source_root in a single unpiped process (a pipe would mask its exit code).
+# source_root in unpiped, WRITE-FREE processes (a pipe would mask its exit code;
+# an unguarded run rewrites the committed floor — tests/test_complexipy_snapshot.py).
 
 
 def _layout(root: Path, *, first_party: str = "[]", py_present: bool = True) -> gate_runner.Layout:
@@ -461,21 +471,29 @@ def test_complexipy_skips_python_free_repo_visibly(tmp_path: Path) -> None:
     assert gate_runner._complexipy(layout, {}) is None
 
 
-def test_complexipy_targets_source_root_in_one_unpiped_process(
+def test_complexipy_targets_source_root_in_unpiped_write_free_processes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # With the snapshot present, complexipy grades the resolved source_root as a
-    # SINGLE process — piping it (as the mypy stage pipes through the filter)
-    # would mask its exit code (the tool-spike defect this rod fences off).
-    _write(tmp_path, "complexipy-snapshot.json", "{}")
+    # With the snapshot present, complexipy measures the resolved source_root in
+    # UNPIPED processes — piping it (as the mypy stage pipes through the filter)
+    # would mask its exit code (the tool-spike defect this rod fences off). BOTH
+    # argvs are now asserted EXHAUSTIVELY against measurement_argv, in order: the
+    # three-flag allowlist that stood here pinned what IS present and nothing
+    # about what is not, so `-mx 100` could join this argv with every test still
+    # green — and that flag empties the offender set outright, which is the
+    # vacuity vector this rung exists to close.
+    _write(tmp_path, "complexipy-snapshot.json", "[]")
     calls: list[tuple[list[str], str | None]] = []
     _record_calls(monkeypatch, calls)
-    layout = _layout(tmp_path)
-
-    verdict = gate_runner._complexipy(layout, {})
+    tool = Path("/fake") / "complexipy"
+    # py_present=False is the honest fixture: tmp_path holds no .py at all, so an
+    # empty census is an empty WORLD, not the void the vacuity leg must refuse.
+    verdict = gate_runner._complexipy(_layout(tmp_path, py_present=False), {})
 
     assert verdict is not None and verdict.passed
-    assert len(calls) == 1, "one unpiped process — no stdin handoff like the mypy filter pipe"
-    argv, stdin = calls[0]
-    assert argv == [str(Path("/fake") / "complexipy"), str(tmp_path / "src")]
-    assert stdin is None
+    assert [argv for argv, _ in calls] == [
+        measurement_argv(tool, tmp_path / "src", offenders_only=offenders)
+        for offenders in (False, True)
+    ], "census then offenders, each argv exact — an allowlist would let -mx 100 in"
+    assert not {"-mx", "--max-complexity-allowed"} & set(calls[0][0]), "no kit-side budget"
+    assert [stdin for _, stdin in calls] == [None, None], "no stdin handoff like mypy's"

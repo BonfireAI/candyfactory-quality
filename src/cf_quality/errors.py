@@ -13,7 +13,9 @@ Three shapes, one language:
   name, the violations it collected, and the GateError it died on (if any).
   Its :attr:`~GateVerdict.exit_code` and :attr:`~GateVerdict.passed` derive
   the kit-wide exit contract (0 clean · 1 violations · 2 the gate could not
-  run) from those parts, so every gate reports one structured verdict.
+  run) from those parts, so every gate reports one structured verdict. It also
+  carries the ``notices`` and ``evidence`` a PASS needs: a verdict with no
+  measurement behind it cannot be told from one that measured nothing.
 
 All three serialize via ``to_dict()`` so the wire form and the in-process
 form say the same thing.
@@ -112,11 +114,22 @@ class GateVerdict:
         violations: Every finding the gate reported (empty when clean).
         error: The typed failure the gate raised when it could not run, or
             None when the gate completed (clean or with findings).
+        notices: Informational lines a reader needs even on a PASS (default
+            empty). Appended after the original fields, like GateViolation's
+            ``severity``/``fixable``, so existing construction is untouched.
+        evidence: The structured measurement behind the verdict (default
+            empty) — counts, resolved config, whatever proves the gate looked.
+            A PASS with no evidence is indistinguishable from a PASS that
+            measured nothing, and telling those apart is the whole job of a
+            ratchet; prose in ``notices`` cannot carry that to a machine, so
+            the numbers ride their own field.
     """
 
     gate: str
     violations: list[GateViolation]
     error: GateError | None = None
+    notices: list[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -138,4 +151,6 @@ class GateVerdict:
             "exit_code": self.exit_code,
             "error": self.error.to_dict() if self.error is not None else None,
             "violations": [violation.to_dict() for violation in self.violations],
+            "notices": list(self.notices),
+            "evidence": dict(self.evidence),
         }

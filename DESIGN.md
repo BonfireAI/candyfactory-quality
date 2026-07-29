@@ -56,8 +56,10 @@ Shared configs: `configs/ruff-base.toml` (C901 ≤ 10, PLR0915 ≤ 50, S battery
 BLE ban — the ratified budgets), `configs/mypy-base.toml` (strict-leaning
 profile, see §10), `configs/jscpd.src.json` / `configs/jscpd.tests.json` (the
 two-profile clone carve-out, see §7). Tool-behavior ground truth lives in
-`docs/tool-spikes.md` — complexipy 5.5.0 and mypy-baseline 0.7.4 semantics
-were observed on fixtures, not read off READMEs.
+`docs/tool-spikes.md` — complexipy and mypy-baseline semantics were observed on
+fixtures, not read off READMEs (spiked on complexipy 5.5.0 · mypy-baseline
+0.7.4; complexipy's snapshot-write semantics re-measured on the pinned 5.6.0
+on 2026-07-28, and they inverted — see §4.11).
 
 **The single reproducible entrypoint — `cf-gate` (`gate_runner.py`).** The
 battery above is split across many console scripts and external tools so each
@@ -135,9 +137,19 @@ become green-forever):
    to `:0`, so unrelated drift cannot resurrect findings.
 6. **Cognitive-complexity watermark:** `complexipy src --snapshot-create`
    **from the repo root** (the snapshot lands in CWD, not the analyzed path)
-   → commit `complexipy-snapshot.json`. Observed gotchas: the snapshot does
-   NOT auto-shrink (the kit owns the re-snapshot on merge, or improvements
-   are not locked in); piping the gate command masks its exit code.
+   → commit `complexipy-snapshot.json`. This is the ONLY complexipy command a
+   consumer ever runs by hand. Measured on the pinned **complexipy 5.6.0**
+   (2026-07-28): a *passing* plain-run compare REWRITES the snapshot —
+   `handle_snapshot_watermark` calls `create_snapshot_file` on its
+   no-violation branch — so the tool will shrink its own floor to `[]` at
+   exit 0. `cf-gate` therefore measures write-free (`--snapshot-ignore`), AUDITS
+   the consumer's complexipy config so `snapshot-create` cannot re-open that
+   write from TOML, and grades in `complexipy_ratchet` (§4.11). The duty that
+   remains: a shrink is locked in only by a deliberate re-`--snapshot-create`,
+   because the watermark rule is a `>` bound and a stale watermark still
+   grandfathers a climb back up to it. Re-boot in the SAME commit as any change
+   to `max-complexity-allowed`, or the gate refuses the mismatch
+   (`GATE_COMPLEXIPY_THRESHOLD_RAISED`).
 7. **Exemptions:** if the repo carries any gated suppression, register each
    in `exemptions.json` (five fields: file, symbol_or_line, rule, reason,
    approver) and set `frozen_count`.
@@ -460,11 +472,50 @@ ordinary PR.
   new. Fixed-only also exits nonzero ("re-sync"), so every shrink is
   committed — the ratchet direction is enforced by the tool itself.
 - **complexipy — set-like per function** (new offender fails; baselined
-  offender worsening fails), but the snapshot does NOT auto-shrink: the
-  re-snapshot-on-merge step is runbook procedure (§3 step 6), not yet CI
-  mechanism. The complexipy step IS in `quality-gate.yml` (and `self-ci.yml`)
-  as of 2026-06-11, with the mypy-style presence rule: a Python repo without
-  its committed snapshot FAILS; only a Python-free repo skips, visibly.
+  offender worsening fails), and graded by the KIT, not by the tool. The
+  2026-06-10 spike recorded on 5.5.0 that the snapshot never shrinks itself.
+  Re-measured on the pinned **complexipy 5.6.0** (2026-07-28) that claim is
+  false and inverted: a *passing* compare rewrites the floor —
+  `handle_snapshot_watermark` calls `create_snapshot_file` on its no-violation
+  branch — reproduced at exit 0 shrinking a populated snapshot to `[]` both by
+  grading a narrower path than the floor and by raising the threshold above
+  every function. So the vector here was never "the floor cannot shrink", it
+  was "the floor can be **zeroed** behind a green run", which is laundering by
+  deletion. That zeroing is CLOSED by construction: `cf-gate` measures with
+  `--snapshot-ignore`, AUDITS the consumer's own complexipy config so the other
+  write path cannot be re-opened from TOML (`snapshot-create` resolves
+  CLI-first/TOML-second and has no negating flag, so a config carrying it made
+  both measurement runs rewrite the floor —
+  `GATE_COMPLEXIPY_CONFIG_DEFEATS_MEASUREMENT` now refuses it, naming the key
+  and the file), and compares in `complexipy_ratchet.grade`, a pure function
+  of (committed floor, measured census) — nothing the tool does can rewrite
+  the artifact it is graded against. Residue, and it is the OLD residue in a
+  narrower form: locking a shrink IN is still runbook procedure (§3 step 6),
+  not CI mechanism — the watermark is a `>` bound, so an improvement that is
+  never re-snapshotted leaves a stale watermark a later regression may climb
+  back to, and a deleted floor file leaves a dead entry that would grandfather
+  a same-named function if the file returned. Mechanical now, stated exactly
+  (an earlier pass on this branch wrote that emptying a floor file of functions
+  FAILS — false, since `--plain` lists every measured function regardless of
+  threshold): a floor file that still exists but was not **measured**, or that
+  sits outside the graded root, FAILS
+  (`COMPLEXIPY_SNAPSHOT_FILE_UNMEASURED` / `COMPLEXIPY_SURFACE_NARROWED`); a
+  floor **function** missing from a file that WAS measured FAILS
+  (`COMPLEXIPY_SNAPSHOT_FUNCTION_UNMEASURED` — the shape a
+  `# complexipy: ignore` comment takes, an unregistered exemption from this
+  gate); a threshold raised above a committed watermark REFUSES rather than
+  grading the emptied offender set (`GATE_COMPLEXIPY_THRESHOLD_RAISED`,
+  threshold-free: a floor entry proves that function was above the boot bar);
+  and a run that measured zero functions cannot report clean while the floor
+  names functions or the repo contains Python at all
+  (`GATE_COMPLEXIPY_MEASURED_NOTHING`, riding the caller's repo-wide
+  `py_present` so the vacuity leg and the absent-snapshot doctrine cannot
+  disagree). Not machine-caught: a floor a human zeroes by hand and commits is
+  green — the ratchet just goes vacuous, and only the
+  `complexipy-snapshot.json` diff in review shows it. The
+  complexipy step IS in `quality-gate.yml` (and `self-ci.yml`) as of
+  2026-06-11, with the mypy-style presence rule: a Python repo without its
+  committed snapshot FAILS; only a Python-free repo skips, visibly.
 - **cf-exemptions — count-based by design**, and honestly so: `frozen_count`
   refuses silent growth, but a 1-for-1 entry swap at equal count is
   machine-visible only as an `exemptions.json` diff in review, not

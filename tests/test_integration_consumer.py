@@ -107,9 +107,19 @@ def test_injected_type_error_flips_the_battery_red(
 ) -> None:
     consumer = _consumer_copy(tmp_path)
     _stub_pytest(monkeypatch)
-    # A module-level type error: mypy flags it, ruff does not (it is not a lint
-    # finding), so the mypy stage is the SOLE failure — the e2e path truly grades.
-    (consumer / "app" / "widget.py").write_text("bad: int = 'not an int'\n", encoding="utf-8")
+    # A module-level type error, APPENDED — never written OVER the module. mypy flags
+    # it; ruff does not (it is no lint finding, and the value is double-quoted so
+    # `ruff format --check` leaves it alone), so the mypy stage is the SOLE failure and
+    # the e2e path truly grades. Replacing widget.py would delete the fixture's ONLY
+    # function, leaving a source root that is Python-but-functionless: the complexipy
+    # stage then correctly refuses for having measured nothing
+    # (GATE_COMPLEXIPY_MEASURED_NOTHING — a setup error, exit 2), and the battery goes
+    # red for a vacuous complexity grade instead of for the injected type error. Red
+    # for the wrong reason is the failure mode this append exists to prevent.
+    widget = consumer / "app" / "widget.py"
+    widget.write_text(
+        widget.read_text(encoding="utf-8") + 'bad: int = "not an int"\n', encoding="utf-8"
+    )
 
     verdicts = run_battery(consumer, os.environ)
     by_gate = {verdict.gate: verdict for verdict in verdicts}

@@ -67,8 +67,13 @@ carries a dated ratchet ticket so green-by-baseline cannot become green-forever)
 ```bash
 cf-file-budget init        # freeze existing >500-line files at measured size
 mypy src | mypy-baseline sync
-complexipy src             # cognitive-complexity snapshot (second metric)
+complexipy src --snapshot-create   # cognitive-complexity floor (second metric)
 ```
+
+`--snapshot-create` is not optional here, and a bare `complexipy src` is never the
+right command: with a snapshot present the tool's own *passing* compare REWRITES the
+floor (measured on the pinned 5.6.0 — see `configs/BASELINE-CONVENTIONS.md` §1).
+Run it from the repo root; the snapshot lands in CWD, not in the analyzed path.
 
 ## Development
 
