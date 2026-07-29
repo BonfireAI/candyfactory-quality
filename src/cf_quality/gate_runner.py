@@ -37,6 +37,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from cf_quality.complexipy_ratchet import complexipy_verdict
 from cf_quality.errors import GateError, GateVerdict, GateViolation
 from cf_quality.mypy_normalize import normalize_mypy_stdout
 from cf_quality.repo_config import (
@@ -321,7 +322,7 @@ def _mypy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
 
 
 def _complexipy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
-    """complexipy through the snapshot ratchet; same refuse/skip doctrine as mypy."""
+    """complexipy WRITE-FREE (its own compare REWRITES the floor); see complexipy_ratchet."""
     if not (layout.root / "complexipy-snapshot.json").is_file():
         return _ratchet_skip_or_refuse(
             layout,
@@ -329,8 +330,7 @@ def _complexipy(layout: Layout, env: Mapping[str, str]) -> GateVerdict | None:
             "complexipy-snapshot.json",
             "boot the snapshot (complexipy <source-root> --snapshot-create), even when clean",
         )
-    argv = [str(_tool("complexipy")), str(layout.source_root)]
-    return _run_external("complexipy", argv, cwd=layout.root, env=env)
+    return complexipy_verdict(layout.root, layout.source_root, env, _tool("complexipy"), _exec)
 
 
 def _ratchet_skip_or_refuse(
