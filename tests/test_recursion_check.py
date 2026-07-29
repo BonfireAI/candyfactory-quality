@@ -393,7 +393,7 @@ def test_scan_tree_walks_nested_packages(tmp_path: Path) -> None:
     pkg.mkdir(parents=True)
     (pkg / "ok.py").write_text("def flat():\n    return 1\n", encoding="utf-8")
     (pkg / "bad.py").write_text("def loop():\n    loop()\n", encoding="utf-8")
-    violations = scan_tree(tmp_path / "src")
+    violations, _ = scan_tree(tmp_path / "src")
     assert [v.path for v in violations] == ["pkg/bad.py"]
 
 

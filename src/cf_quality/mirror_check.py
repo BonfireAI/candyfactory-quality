@@ -279,8 +279,8 @@ def check_mirrors(
     *,
     max_pin_age_days: int = DEFAULT_MAX_PIN_AGE_DAYS,
     today: dt.date | None = None,
-) -> list[GateViolation]:
-    """Check every declared mirror in ``repo/MIRRORS.md``; return all findings."""
+) -> tuple[list[GateViolation], int]:
+    """Check every declared mirror in ``repo/MIRRORS.md`` — findings and row count."""
     mirrors_path = repo / "MIRRORS.md"
     if not mirrors_path.is_file():
         raise GateError(
@@ -293,7 +293,7 @@ def check_mirrors(
     violations: list[GateViolation] = []
     for row in rows:
         violations.extend(_check_row(repo, row, max_pin_age_days, effective_today))
-    return violations
+    return violations, len(rows)
 
 
 def render_template() -> str:
@@ -345,12 +345,14 @@ def main(argv: list[str] | None = None) -> int:
             path = init_mirrors(repo)
             print(f"wrote {path}")
             return 0
-        violations = check_mirrors(repo, max_pin_age_days=args.max_pin_age_days)
+        violations, rows = check_mirrors(repo, max_pin_age_days=args.max_pin_age_days)
     except GateError as error:
         return print_verdict("cf-mirror-check", [], error)
     return print_verdict(
         "cf-mirror-check",
         violations,
+        measured=f"— checked {rows} declared mirror row(s) in MIRRORS.md",
+        evidence={"mirror_rows": rows},
         clean_summary="cf-mirror-check: OK",
         fail_summary=f"cf-mirror-check: FAIL ({len(violations)} violation(s))",
     )

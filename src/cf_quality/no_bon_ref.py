@@ -115,8 +115,8 @@ def scan_file(path: Path, root: Path) -> list[GateViolation]:
     ]
 
 
-def scan_tree(root: Path) -> list[GateViolation]:
-    """Scan the whole code/config tree; raise GateError when the root is absent."""
+def scan_tree(root: Path) -> tuple[list[GateViolation], int]:
+    """Sweep the code/config tree — findings and files swept; GateError when absent."""
     if not root.exists():
         raise GateError(
             code="GATE_PATH_MISSING",
@@ -124,9 +124,11 @@ def scan_tree(root: Path) -> list[GateViolation]:
             context={"path": str(root)},
         )
     violations: list[GateViolation] = []
+    swept = 0
     for path in iter_source_files(root):
+        swept += 1
         violations.extend(scan_file(path, root))
-    return sorted(violations, key=lambda v: (v.path, v.line or 0))
+    return sorted(violations, key=lambda v: (v.path, v.line or 0)), swept
 
 
 # --- the reasoned, ratcheted exemption registry -----------------------------
@@ -212,12 +214,12 @@ def _partition(
     return failing, blessed
 
 
-def check(root: Path) -> tuple[list[GateViolation], list[str]]:
-    """Sweep the tree, apply the reasoned registry, ratchet it — (violations, notices)."""
-    found = scan_tree(root)
+def check(root: Path) -> tuple[list[GateViolation], list[str], int]:
+    """Sweep, apply the reasoned registry, ratchet — (violations, notices, files swept)."""
+    found, swept = scan_tree(root)
     config = load_exemptions(root)
     if config is None:
-        return found, []
+        return found, [], swept
     entries, frozen = config
     failing, blessed = _partition(found, entries)
     failing.extend(_ratchet_violation(len(entries), frozen))
@@ -225,7 +227,7 @@ def check(root: Path) -> tuple[list[GateViolation], list[str]]:
         f"=== TICKET-REF EXEMPTIONS: {len(entries)} entries / frozen_count {frozen} ===",
         *blessed,
     ]
-    return failing, notices
+    return failing, notices, swept
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -237,13 +239,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=".", help="repo root to sweep (default: cwd)")
     args = parser.parse_args(argv)
     try:
-        violations, notices = check(Path(args.root).resolve())
+        violations, notices, swept = check(Path(args.root).resolve())
     except GateError as exc:
         return print_verdict("cf-no-bon-ref", [], exc)
     return print_verdict(
         "cf-no-bon-ref",
         violations,
         notices=notices,
+        measured=f"— swept {swept} file(s) of the code/config tree for ticket refs",
+        evidence={"files_swept": swept},
         clean_summary="cf-no-bon-ref: OK (no ticket references in the code/config tree)",
         fail_summary=f"cf-no-bon-ref: FAIL ({len(violations)} ticket reference(s))",
     )

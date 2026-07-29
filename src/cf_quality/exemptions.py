@@ -285,9 +285,11 @@ def _ratchet_report(entry_count: int, frozen_count: int) -> tuple[list[GateViola
     return violations, lines
 
 
-def check(root: Path) -> tuple[list[GateViolation], list[str]]:
-    """Run checks (a)-(e) against a repo root; returns (violations, report lines)."""
+def check(root: Path) -> tuple[list[GateViolation], list[str], dict[str, int]]:
+    """Run checks (a)-(e) — (violations, report lines, the counts measured)."""
     suppressions, violations = _scan_src(root)
+    surface = tuple(discover_scan_paths(root))
+    counts = {"suppressions": len(suppressions), "scan_paths": len(surface), "entries": 0}
     config = _load_config(root)
     if config is None:
         if suppressions:
@@ -296,16 +298,17 @@ def check(root: Path) -> tuple[list[GateViolation], list[str]]:
                 message="gated suppressions found in src/ but exemptions.json is missing",
                 context={"suppressions": len(suppressions)},
             )
-        return violations, ["no exemptions.json and no gated suppressions — nothing to register"]
+        quiet = "no exemptions.json and no gated suppressions — nothing to register"
+        return violations, [quiet], counts
     entries, frozen_count = config
-    surface = tuple(discover_scan_paths(root))
+    counts["entries"] = len(entries)
     anchors = exemption_anchors.audit(root, entries, suppressions, surface)
     match_violations, registered_lines = _match_suppressions(suppressions, entries, anchors.rotted)
     violations.extend(anchors.violations)
     violations.extend(match_violations)
     ratchet_violations, lines = _ratchet_report(len(entries), frozen_count)
     violations.extend(ratchet_violations)
-    return violations, [*lines, *anchors.notices, *registered_lines]
+    return violations, [*lines, *anchors.notices, *registered_lines], counts
 
 
 def _unregistered_violation(
@@ -446,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     try:
-        violations, lines = check(root)
+        violations, lines, counts = check(root)
         fold_in_lines, fold_in_exit = _run_fold_ins(root)
     except GateError as error:
         return print_verdict("cf-exemptions", [], error)
@@ -456,6 +459,11 @@ def main(argv: list[str] | None = None) -> int:
             "cf-exemptions",
             violations,
             notices=notices,
+            measured=(
+                f"— measured {counts['suppressions']} suppression(s) over "
+                f"{counts['scan_paths']} scan path(s) against {counts['entries']} entry(ies)"
+            ),
+            evidence=counts,
             clean_summary="cf-exemptions: OK",
             fail_summary=f"cf-exemptions: FAIL ({len(violations)} violation(s))",
         )

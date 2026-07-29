@@ -115,7 +115,10 @@ class TestLoadBudget:
 
 
 class TestCheckNewFiles:
-    def test_new_file_over_500_lines_fails(self, tmp_path: Path, capsys: Any) -> None:
+    def test_new_file_over_500_lines_fails(
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         write_py(tmp_path / "src" / "big.py", NEW_FILE_BUDGET + 1)
         assert main(["check", "--root", str(tmp_path)]) == 1
         report = report_from(capsys.readouterr().out)
@@ -129,7 +132,10 @@ class TestCheckNewFiles:
         write_py(tmp_path / "src" / "fits.py", NEW_FILE_BUDGET)
         assert main(["check", "--root", str(tmp_path)]) == 0
 
-    def test_report_lists_every_offender(self, tmp_path: Path, capsys: Any) -> None:
+    def test_report_lists_every_offender(
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         write_py(tmp_path / "a.py", 600)
         write_py(tmp_path / "b.py", 700)
         assert main(["check", "--root", str(tmp_path)]) == 1
@@ -139,7 +145,10 @@ class TestCheckNewFiles:
 
 
 class TestFrozenFiles:
-    def test_frozen_file_that_grew_fails(self, tmp_path: Path, capsys: Any) -> None:
+    def test_frozen_file_that_grew_fails(
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         write_py(tmp_path / "src" / "handle.py", 700)
         write_budget(tmp_path, {"files": {"src/handle.py": 694}, "packages": {"src": 694}})
         assert main(["check", "--root", str(tmp_path)]) == 1
@@ -178,8 +187,9 @@ class TestPackageBudget:
     """The sibling-file-accretion answer (refuter gaming vector #1)."""
 
     def test_handle_extra_at_499_next_to_frozen_handle_fails(
-        self, tmp_path: Path, capsys: Any
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
     ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         # Fixture package: the big-legacy-module anchor case. handle.py frozen at 700,
         # package frozen at 700 total. The burn agent dodges the per-file
         # gate by creating handle_extra.py at 499 lines — the package
@@ -209,7 +219,10 @@ class TestPackageBudget:
         )
         assert main(["check", "--root", str(tmp_path)]) == 0
 
-    def test_package_budget_counts_subdirectories(self, tmp_path: Path, capsys: Any) -> None:
+    def test_package_budget_counts_subdirectories(
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         # Hiding the sibling one directory deeper does not dodge the draw.
         write_py(tmp_path / "src" / "engine" / "handle.py", 700)
         write_py(tmp_path / "src" / "engine" / "extra" / "handle_extra.py", 499)
@@ -238,7 +251,10 @@ class TestDeclaredFiles:
         )
         assert main(["check", "--root", str(tmp_path)]) == 0
 
-    def test_declared_file_still_obeys_new_file_cap(self, tmp_path: Path, capsys: Any) -> None:
+    def test_declared_file_still_obeys_new_file_cap(
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         write_py(tmp_path / "src" / "engine" / "webhook.py", 501)
         write_budget(
             tmp_path,
@@ -316,9 +332,12 @@ class TestCompressionResistance:
         assert main(["check", "--root", str(tmp_path)]) == 1
         out = capsys.readouterr().out
         assert "ratchet the baseline down" not in out  # no shrink notice was printed
-        assert "FILE_BUDGET_GREW" in violation_codes(report_from(out))
+        assert "FILE_BUDGET_GREW" in out
 
-    def test_joined_shrink_cannot_free_package_headroom(self, tmp_path: Path, capsys: Any) -> None:
+    def test_joined_shrink_cannot_free_package_headroom(
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         # The full refuter repro: joined handle.py + a brand-new 380-line
         # sibling = 1280 real statements in a package frozen at 700.
         write_joined_py(tmp_path / "src" / "engine" / "handle.py", 900, 3)
@@ -332,8 +351,9 @@ class TestCompressionResistance:
         assert "PACKAGE_BUDGET_EXCEEDED" in codes
 
     def test_new_file_cap_counts_statements_not_just_lines(
-        self, tmp_path: Path, capsys: Any
+        self, tmp_path: Path, capsys: Any, monkeypatch: Any
     ) -> None:
+        monkeypatch.setenv("CF_QUALITY_JSON", "1")
         # 600 statements squeezed onto 200 physical lines is a >500 file in truth.
         write_joined_py(tmp_path / "src" / "mod.py", 600, 3)
         assert main(["check", "--root", str(tmp_path)]) == 1
@@ -377,7 +397,7 @@ class TestGreenfieldPackageBoundary:
             write_py(tmp_path / "src" / "engine" / f"engine_{name}.py", 499)
         data = init_tree(tmp_path)
         assert data == {"files": {}, "packages": {}}  # nothing seeded the draw
-        violations, _ = check_tree(tmp_path, Budget(files={}, packages={}))
+        violations, _, _ = check_tree(tmp_path, Budget(files={}, packages={}))
         assert violations == []  # 2495 lines in one package, green — the boundary
         import cf_quality.file_budget as fb
 
@@ -388,10 +408,11 @@ class TestGreenfieldPackageBoundary:
 class TestCheckTreeApi:
     def test_check_tree_returns_typed_violations(self, tmp_path: Path) -> None:
         write_py(tmp_path / "big.py", 600)
-        violations, notices = check_tree(tmp_path, Budget(files={}, packages={}))
+        violations, notices, files = check_tree(tmp_path, Budget(files={}, packages={}))
         assert len(violations) == 1
         assert violations[0].to_dict()["code"] == "FILE_BUDGET_EXCEEDED"
         assert notices == []
+        assert files == 1  # the denominator is the tree it actually measured
 
 
 class TestMainErrors:

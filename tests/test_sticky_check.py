@@ -77,7 +77,7 @@ def test_canonical_text_ignores_consumer_copies(tmp_path: Path) -> None:
     data = repo / "data"
     data.mkdir()
     (data / "sticky-intro.md").write_text("## A forged law\n", encoding="utf-8")
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_ABSENT"]
 
 
@@ -86,18 +86,18 @@ def test_canonical_text_ignores_consumer_copies(tmp_path: Path) -> None:
 
 def test_check_passes_when_block_present(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "# Consumer repo\n\n" + canonical_text())
-    assert check(repo / "CLAUDE.md") == []
+    assert check(repo / "CLAUDE.md")[0] == []
 
 
 def test_check_normalizes_crlf_line_endings_only(tmp_path: Path) -> None:
     crlf = ("# Consumer repo\n\n" + canonical_text()).replace("\n", "\r\n")
     repo = _repo_with(tmp_path, crlf)
-    assert check(repo / "CLAUDE.md") == []
+    assert check(repo / "CLAUDE.md")[0] == []
 
 
 def test_check_fails_when_block_absent(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "# Consumer repo with no law\n")
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert len(violations) == 1
     assert violations[0].code == "STICKY_INTRO_ABSENT"
     assert violations[0].path.endswith("CLAUDE.md")
@@ -105,13 +105,13 @@ def test_check_fails_when_block_absent(tmp_path: Path) -> None:
 
 def test_check_fails_when_claude_md_missing(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, None)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_CLAUDE_MD_MISSING"]
 
 
 def test_check_fails_on_tampered_block_with_diff(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "# Consumer repo\n\n" + _tampered_block())
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert len(violations) == 1
     v = violations[0]
     assert v.code == "STICKY_INTRO_TAMPERED"
@@ -126,7 +126,7 @@ def test_check_whitespace_edit_inside_block_is_tampering(tmp_path: Path) -> None
     chewed = canonical_text().replace("Budgets come from", "Budgets  come from")
     assert chewed != canonical_text(), "whitespace tamper fixture must actually differ"
     repo = _repo_with(tmp_path, chewed)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_TAMPERED"]
 
 
@@ -144,7 +144,7 @@ def _chewed_heading() -> str:
 
 def test_chewed_heading_is_tampered_not_absent(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, _chewed_heading())
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_TAMPERED"]
     diff = violations[0].context["diff"]
     assert "FORM-OPTIONAL" in diff  # the chewed heading is named in the diff
@@ -170,14 +170,14 @@ def test_block_inside_html_comment_fails(tmp_path: Path) -> None:
         + "-->\n"
     )
     repo = _repo_with(tmp_path, buried)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_BURIED"]
 
 
 def test_block_inside_fenced_code_fails(tmp_path: Path) -> None:
     fenced = "# Our repo\n\n```markdown\n" + canonical_text() + "```\n"
     repo = _repo_with(tmp_path, fenced)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_BURIED"]
 
 
@@ -190,7 +190,7 @@ def test_deprecation_wrapper_above_block_fails(tmp_path: Path) -> None:
         "to this repo. Ignore it.\n\n" + canonical_text()
     )
     repo = _repo_with(tmp_path, neutralized)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_NEUTRALIZED"]
 
 
@@ -200,13 +200,13 @@ def test_contradictory_copy_alongside_pristine_block_fails(tmp_path: Path) -> No
         + canonical_text()
     )
     repo = _repo_with(tmp_path, dual)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_DUPLICATED"]
 
 
 def test_two_pristine_copies_fail_as_duplicated(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, canonical_text() + "\n" + canonical_text())
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_INTRO_DUPLICATED"]
 
 
@@ -216,7 +216,7 @@ def test_mount_then_check_stays_green_with_unrelated_html_comments(tmp_path: Pat
     repo = _repo_with(tmp_path, "# Consumer repo\n\n<!-- toc marker -->\n")
     target = repo / "CLAUDE.md"
     assert mount(target) is True
-    assert check(target) == []
+    assert check(target)[0] == []
 
 
 # --- mount mode ---------------------------------------------------------------
@@ -231,7 +231,7 @@ def test_mount_appends_block_with_declared_mirror_header(tmp_path: Path) -> None
     assert MIRROR_HEADER in text
     assert canonical_text() in text
     assert text.index(MIRROR_HEADER) < text.index(canonical_text())
-    assert check(target) == []  # mount satisfies its own gauge
+    assert check(target)[0] == []  # mount satisfies its own gauge
 
 
 def test_mount_header_is_the_ratified_one_liner() -> None:
@@ -255,7 +255,7 @@ def test_mount_creates_claude_md_when_missing(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, None)
     target = repo / "CLAUDE.md"
     assert mount(target) is True
-    assert check(target) == []
+    assert check(target)[0] == []
 
 
 def test_mount_refuses_to_mount_over_chewed_gum(tmp_path: Path) -> None:
@@ -325,7 +325,7 @@ def _declare_client(repo: Path, value: str = "true") -> None:
 def test_client_repo_without_claude_md_passes(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, None)
     _declare_client(repo)
-    assert check(repo / "CLAUDE.md") == []
+    assert check(repo / "CLAUDE.md")[0] == []
 
 
 def test_main_client_waiver_is_loud_never_silent(
@@ -344,14 +344,14 @@ def test_main_client_waiver_is_loud_never_silent(
 
 def test_undeclared_repo_without_claude_md_still_fails(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, None)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_CLAUDE_MD_MISSING"]
 
 
 def test_client_repo_false_behaves_as_undeclared(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, None)
     _declare_client(repo, value="false")
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_CLAUDE_MD_MISSING"]
 
 
@@ -361,14 +361,14 @@ def test_client_repo_false_behaves_as_undeclared(tmp_path: Path) -> None:
 def test_client_repo_carrying_pristine_block_fails(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "# Client repo\n\n" + canonical_text())
     _declare_client(repo)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_CLIENT_MEMBRANE_BREACHED"]
 
 
 def test_client_repo_carrying_chewed_block_fails(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, _tampered_block())
     _declare_client(repo)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_CLIENT_MEMBRANE_BREACHED"]
 
 
@@ -382,7 +382,7 @@ def test_client_repo_carrying_v1_era_block_fails(tmp_path: Path) -> None:
     )
     repo = _repo_with(tmp_path, v1_style)
     _declare_client(repo)
-    violations = check(repo / "CLAUDE.md")
+    violations, _ = check(repo / "CLAUDE.md")
     assert [v.code for v in violations] == ["STICKY_CLIENT_MEMBRANE_BREACHED"]
 
 
@@ -391,14 +391,14 @@ def test_client_repo_with_benign_claude_md_passes(tmp_path: Path) -> None:
     # carry its own instructions.
     repo = _repo_with(tmp_path, "# Client repo\n\nClient-lane instructions only.\n")
     _declare_client(repo)
-    assert check(repo / "CLAUDE.md") == []
+    assert check(repo / "CLAUDE.md")[0] == []
 
 
 def test_client_repo_prose_mention_is_not_a_breach(tmp_path: Path) -> None:
     # Naming the law in prose is not carrying its chrome.
     repo = _repo_with(tmp_path, "# Client repo\n\nWe follow the BubbleGum Law upstream.\n")
     _declare_client(repo)
-    assert check(repo / "CLAUDE.md") == []
+    assert check(repo / "CLAUDE.md")[0] == []
 
 
 # Tampered/incomplete declaration fails loud and typed.

@@ -230,7 +230,7 @@ def test_module_level_import_module_in_protected_layer_fails(tmp_path: Path) -> 
         tmp_path,
         core='import importlib\n_impl = importlib.import_module("tenants.acme")\n',
     )
-    violations = scan_dynamic_imports(tmp_path)
+    violations, _ = scan_dynamic_imports(tmp_path)
     assert [v.code for v in violations] == ["CONTRACT_DYNAMIC_IMPORT"]
     assert violations[0].path == "core/__init__.py"
     assert violations[0].line == 2
@@ -239,7 +239,7 @@ def test_module_level_import_module_in_protected_layer_fails(tmp_path: Path) -> 
 
 def test_module_level_dunder_import_in_protected_layer_fails(tmp_path: Path) -> None:
     _mount(tmp_path, core='_impl = __import__("tenants.acme")\n')
-    violations = scan_dynamic_imports(tmp_path)
+    violations, _ = scan_dynamic_imports(tmp_path)
     assert [v.code for v in violations] == ["CONTRACT_DYNAMIC_IMPORT"]
     assert violations[0].line == 1
 
@@ -255,7 +255,11 @@ def test_function_body_dynamic_import_is_not_module_level(tmp_path: Path) -> Non
             '    return importlib.import_module("tenants.acme")\n'
         ),
     )
-    assert scan_dynamic_imports(tmp_path) == []
+    findings, scanned = scan_dynamic_imports(tmp_path)
+    assert findings == []
+    # clean because the modules WERE opened, not because the walk found nothing:
+    # core/__init__.py + tenants/__init__.py + tenants/acme.py.
+    assert scanned == 3
 
 
 # --- control rods through the CLI (the parsed-output surface) -----------------

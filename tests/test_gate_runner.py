@@ -168,7 +168,7 @@ def test_parser_full_gateverdict_json_is_used_verbatim() -> None:
 
 
 def test_parser_violations_subset_json_builds_verdict() -> None:
-    # file_budget emits {gate, violations} — no passed/exit_code/error fields.
+    # A partial emitter sends {gate, violations} — no passed/exit_code/error.
     raw = json.dumps(
         {
             "gate": "cf-file-budget",

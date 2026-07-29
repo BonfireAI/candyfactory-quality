@@ -189,13 +189,14 @@ def _structured_verdict(gate: str, data: Mapping[str, Any]) -> GateVerdict:
     """Build a verdict from a cf-* gate's JSON — full shape or the subset.
 
     Honours an ``error`` field so a gate that exits 2 under its own GateError
-    contract resolves to a GateError verdict; the subset (file_budget) has none.
+    contract resolves to a GateError verdict; a partial emitter's has none.
     """
-    violations = [_violation_from_dict(item) for item in data.get("violations", [])]
     return GateVerdict(
         gate=data.get("gate", gate),
-        violations=violations,
+        violations=[_violation_from_dict(item) for item in data.get("violations", [])],
         error=_error_from_dict(data.get("error")),
+        notices=list(data.get("notices", [])),
+        evidence=dict(data.get("evidence", {})),
     )
 
 
@@ -203,7 +204,7 @@ def _verdict_from_proc(gate: str, proc: subprocess.CompletedProcess[str]) -> Gat
     """Parse a cf-* gate's output into a verdict, robust to its three wire shapes.
 
     1. a full GateVerdict JSON (or any object carrying ``error``) → use it;
-    2. the ``{gate, violations}`` subset (file_budget) → verdict, error=None;
+    2. the ``{gate, violations}`` subset (a partial emitter) → verdict, error=None;
     3. non-JSON human text (e.g. sticky-check) → exit-code semantics: rc 0 is
        clean, any non-zero is one violation carrying the output (NOT a GateError
        — unparseable output is not a gate-could-not-run condition).
@@ -225,8 +226,7 @@ def _run_cf_gate(
 ) -> GateVerdict:
     """Run a cf-* console gate in JSON mode and parse its verdict."""
     sub_env = {**env, "CF_QUALITY_JSON": "1"}
-    proc = _exec([str(_tool(gate)), *args], cwd, sub_env)
-    return _verdict_from_proc(gate, proc)
+    return _verdict_from_proc(gate, _exec([str(_tool(gate)), *args], cwd, sub_env))
 
 
 # --- the stages (declared once, mirroring quality-gate.yml) -----------------

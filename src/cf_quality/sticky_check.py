@@ -260,10 +260,20 @@ def _membrane_violations(claude_md: Path, canonical_lines: list[str]) -> list[Ga
     ]
 
 
-def check(claude_md: Path) -> list[GateViolation]:
+def check(claude_md: Path) -> tuple[list[GateViolation], int]:
+    """Gauge one CLAUDE.md — its findings, and the file count examined (1 or 0).
+
+    The presence test is taken ONCE and threaded, so the reported denominator
+    is the very fact the gauge decided on, never a second look at the disk.
+    """
+    present = claude_md.is_file()
+    return _check_present(claude_md, present), int(present)
+
+
+def _check_present(claude_md: Path, present: bool) -> list[GateViolation]:
     """Gauge one CLAUDE.md against the kit's canonical sticky block."""
     client = repo_config.load(claude_md.parent).client_repo
-    if not claude_md.is_file():
+    if not present:
         if client:
             return []  # the membrane waives the mount; the CLI prints it loud
         return [
@@ -356,7 +366,7 @@ def _resolve_target(raw: str) -> Path:
 
 
 def _run_check(target: Path) -> int:
-    violations = check(target)
+    violations, examined = check(target)
     notices: list[str] = []
     if not violations and repo_config.load(target.parent).client_repo:
         notices.append(CLIENT_MEMBRANE_NOTICE)  # the waiver is loud, never silent
@@ -364,6 +374,8 @@ def _run_check(target: Path) -> int:
         "cf-sticky-check",
         violations,
         notices=notices,
+        measured=f"— examined {examined} CLAUDE.md against the canonical sticky block",
+        evidence={"claude_md_examined": examined},
         clean_summary="cf-sticky-check: OK",
         fail_summary=f"cf-sticky-check: FAIL ({len(violations)} violation(s))",
     )

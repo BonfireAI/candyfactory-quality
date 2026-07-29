@@ -86,13 +86,13 @@ class TestCheck:
     def test_clean_mirror_reports_no_violations(self, tmp_path: Path) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"the law travels sticky\n")
         write_mirrors(tmp_path, row("data/intro.md", digest))
-        assert check_mirrors(tmp_path, today=TODAY) == []
+        assert check_mirrors(tmp_path, today=TODAY)[0] == []
 
     def test_diverged_mirror_fails_with_both_hashes(self, tmp_path: Path) -> None:
         make_mirror(tmp_path, "data/intro.md", b"drifted content\n")
         declared = sha256_of(b"the original content\n")
         write_mirrors(tmp_path, row("data/intro.md", declared))
-        violations = check_mirrors(tmp_path, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_DIVERGED"]
         v = violations[0]
         assert v.path == "data/intro.md"
@@ -101,7 +101,7 @@ class TestCheck:
 
     def test_missing_local_file_fails(self, tmp_path: Path) -> None:
         write_mirrors(tmp_path, row("data/ghost.md", sha256_of(b"x")))
-        violations = check_mirrors(tmp_path, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_FILE_MISSING"]
         assert violations[0].path == "data/ghost.md"
 
@@ -111,7 +111,7 @@ class TestCheck:
             f"| sticky-intro | data/intro.md |  | d.md | {'a' * 40} | {digest} | 2026-06-01 |\n"
         )
         write_mirrors(tmp_path, incomplete)
-        violations = check_mirrors(tmp_path, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_ROW_INCOMPLETE"]
         assert violations[0].context["missing_fields"] == ["parent repo"]
 
@@ -119,7 +119,7 @@ class TestCheck:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         old = (TODAY - dt.timedelta(days=120)).isoformat()
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=old))
-        violations = check_mirrors(tmp_path, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_PIN_STALE"]
         assert violations[0].context["age_days"] == 120
         assert violations[0].context["max_pin_age_days"] == 90
@@ -128,20 +128,20 @@ class TestCheck:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         edge = (TODAY - dt.timedelta(days=90)).isoformat()
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=edge))
-        assert check_mirrors(tmp_path, today=TODAY) == []
+        assert check_mirrors(tmp_path, today=TODAY)[0] == []
 
     def test_custom_max_pin_age_days_is_honored(self, tmp_path: Path) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         old = (TODAY - dt.timedelta(days=10)).isoformat()
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=old))
-        violations = check_mirrors(tmp_path, max_pin_age_days=7, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, max_pin_age_days=7, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_PIN_STALE"]
 
     def test_row_with_empty_pinned_date_is_incomplete(self, tmp_path: Path) -> None:
         # Refuter: a blank pin made a declaration immortal (expiry opt-out).
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=""))
-        violations = check_mirrors(tmp_path, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_ROW_INCOMPLETE"]
         assert "pinned date" in violations[0].context["missing_fields"]
 
@@ -149,7 +149,7 @@ class TestCheck:
         # Refuter: a 2099 pin gave negative age, so staleness could never fire.
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned="2099-01-01"))
-        violations = check_mirrors(tmp_path, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_PIN_FUTURE"]
         assert violations[0].context["pinned_date"] == "2099-01-01"
 
@@ -157,22 +157,22 @@ class TestCheck:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         yesterday = (TODAY - dt.timedelta(days=1)).isoformat()
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=yesterday))
-        violations = check_mirrors(tmp_path, max_pin_age_days=0, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, max_pin_age_days=0, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_PIN_STALE"]
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned=TODAY.isoformat()))
-        assert check_mirrors(tmp_path, max_pin_age_days=0, today=TODAY) == []
+        assert check_mirrors(tmp_path, max_pin_age_days=0, today=TODAY)[0] == []
 
     def test_unparseable_pinned_date_fails_as_invalid(self, tmp_path: Path) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         write_mirrors(tmp_path, row("data/intro.md", digest, pinned="last tuesday"))
-        violations = check_mirrors(tmp_path, today=TODAY)
+        violations, _ = check_mirrors(tmp_path, today=TODAY)
         assert [v.code for v in violations] == ["MIRROR_PIN_INVALID"]
         assert violations[0].context["pinned_date"] == "last tuesday"
 
     def test_hash_comparison_is_case_insensitive(self, tmp_path: Path) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
         write_mirrors(tmp_path, row("data/intro.md", digest.upper()))
-        assert check_mirrors(tmp_path, today=TODAY) == []
+        assert check_mirrors(tmp_path, today=TODAY)[0] == []
 
     def test_missing_mirrors_md_raises_typed_gate_error(self, tmp_path: Path) -> None:
         with pytest.raises(GateError) as exc:
@@ -188,7 +188,7 @@ class TestCheck:
             + row("data/good.md", sha256_of(b"other"), artifact="diverged")
         )
         write_mirrors(tmp_path, rows)
-        codes = sorted(v.code for v in check_mirrors(tmp_path, today=TODAY))
+        codes = sorted(v.code for v in check_mirrors(tmp_path, today=TODAY)[0])
         assert codes == ["MIRROR_DIVERGED", "MIRROR_FILE_MISSING"]
 
 
@@ -199,7 +199,7 @@ class TestInit:
         text = path.read_text(encoding="utf-8")
         assert text == render_template()
         assert parse_mirrors(text) == []  # template carries no live rows
-        assert check_mirrors(tmp_path, today=TODAY) == []  # green by construction
+        assert check_mirrors(tmp_path, today=TODAY)[0] == []  # green by construction
 
     def test_init_refuses_to_overwrite_existing(self, tmp_path: Path) -> None:
         (tmp_path / "MIRRORS.md").write_text("precious\n", encoding="utf-8")
