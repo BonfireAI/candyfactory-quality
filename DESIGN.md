@@ -50,7 +50,7 @@ Law — no swallowed exceptions, no `None`/`-1` returns):
 | `cf-sticky-check` | `sticky_check.py` | sticky intro mounted byte-faithful; chewed gum fails with a diff |
 | `cf-mirror-check` | `mirror_check.py` | cross-repo copies declared in `MIRRORS.md`; hash + pin-age checks |
 | `cf-recursion-check` | `recursion_check.py` | self-recursion declared with a stated bound, or it fails |
-| `cf-exemptions` | `exemptions.py` | every gated suppression traces to a reasoned, approved registry entry |
+| `cf-exemptions` | `exemptions.py` + `exemption_anchors.py` + `exemption_surface.py` | every gated suppression traces to a reasoned, approved registry entry — and every entry still anchors at live code |
 
 Shared configs: `configs/ruff-base.toml` (C901 ≤ 10, PLR0915 ≤ 50, S battery,
 BLE ban — the ratified budgets), `configs/mypy-base.toml` (strict-leaning
@@ -254,12 +254,62 @@ covering more than one live suppression fails `EXEMPTION_ENTRY_OVERLOADED`
 (d) the measured surface is discovered (src/ when present, else top-level
 packages and modules), so a flat/app layout is measured, never a no-op.
 
+*Hardened 2026-07-28 (anchor rot — the mirror question).* The matcher asked
+"does every suppression have a blessing?" and never "does every blessing still
+point at the code it blessed?": `matched_counts` failed only on `count > 1`, so
+a `count == 0` entry was tolerated in silence, and `frozen_count` ratchets
+ENTRIES rather than live coverage, so the ratchet stayed satisfied. Rename an
+enclosing `def` holding a registered suppression and two harms landed together
+— the site was accused of self-issuing a suppression that HAD been blessed
+(a convincing, wrong message; this class of message has cost real review time
+and nearly provoked rewrites of load-bearing error barriers), and the orphaned
+entry was reported not at all. Rename an unrelated `def` INTO the orphaned name
+and its suppression was silently blessed by an entry whose reason and approver
+describe different code — an approval transferred to code nobody approved.
+`cf_quality.exemption_anchors` (a gate helper, not a gate; the 500-line file
+law forced it out of a 494-line module, and the measured-surface half went with
+it into `cf_quality.exemption_surface`) now grades every anchor and names the
+world-state, because each has a different remedy: `EXEMPTION_FILE_MISSING` (drop or re-point),
+`EXEMPTION_SYMBOL_MISSING` (re-anchor to the current qualified name),
+`EXEMPTION_SUPPRESSION_GONE` (drop the entry and lower `frozen_count`; the
+line-anchored analogue rides the same code), `EXEMPTION_ANCHOR_CONTESTED` (an
+entry claims a site while a sibling site in the same file+rule group is
+unregistered — the pairing cannot be settled by name alone).
+`UNREGISTERED_SUPPRESSION` keeps its code, path and exit level but changes its
+PROSE when, and only when, the registry holds a zero-coverage entry for the
+same file and rule: that world is very probably a rename, so the message names
+the stale anchor instead of the developer. With no such orphan the strict
+accusation stands verbatim. Line-anchored entries and entries the gate cannot
+grade (outside the scanned surface, an ungated rule, an unparsable file) are
+LOUD NOTICES, never violations — reding a consumer for a decision it
+documented teaches consumers to pin an older SHA. Every denominator the audit
+reasoned from is printed (`=== ANCHOR AUDIT: ...`) so a run that graded nothing
+says so.
+
 *Residue:* the `approver` field is a string; its authenticity is carried by
 PR review of the `exemptions.json` diff, not by signature. Style/import noqa
 codes (E/F/I/UP/B) remain ungated by the registry — ruff + review carry them.
+A rename-into whose ORIGINAL site was deleted in the same commit leaves one
+live suppression and one live anchor: from a single snapshot it is
+indistinguishable from an honest entry, and no message can honestly claim
+otherwise (Open issues).
+
+*Consumer-visible surface (published, not incidental).* A consumer repo mirrors
+this resolver in its own drift-proof pin and cross-checks the two entry by
+entry, reaching in by name: `exemptions._scan_src(root)` unpacked as exactly
+`(suppressions, violations)`, and `exemptions._matches(suppression, entry)`.
+The anchor split therefore does NOT change either shape — `_matches` stays put
+as a pure adapter over the single resolution rule (`exemption_anchors.covers`),
+and the audit takes its surface from `exemption_surface.discover_scan_paths`
+rather than widening `_scan_src`'s return arity. Both are pinned by
+`TestConsumerResolverContract` in `tests/test_exemption_anchors.py`: a kit that
+breaks its consumers' mirror breaks the one test whose job is detecting drift,
+and that break cannot be repaired in a single PR (a consumer patched for a new
+API fails against the currently pinned kit), so this is a contract, not
+incidental private naming.
 
 **Verdict:** CLOSED for the form, security, and Elegance batteries; the
-approver-authenticity residue is review-carried.
+approver-authenticity and snapshot-blind-rename residues are review-carried.
 
 ### 4.4 jscpd untouched-file blind spot
 
@@ -640,7 +690,18 @@ Everything below is a known gap, on the record. Ordered by blood.
 14. **Exemption entry swap (§4.11)** — `frozen_count` is a count; a 1-for-1
     registry swap is review-visible, not machine-refused. (The collision
     UNDERCOUNT is closed: qualified symbols + `EXEMPTION_ENTRY_OVERLOADED`
-    force a 1:1 entry-to-suppression map.)
+    force a 1:1 entry-to-suppression map. Dead anchors are closed too as of
+    2026-07-28 — `EXEMPTION_FILE_MISSING` / `EXEMPTION_SYMBOL_MISSING` /
+    `EXEMPTION_SUPPRESSION_GONE` / `EXEMPTION_ANCHOR_CONTESTED`.) Two residues
+    remain: (a) a **snapshot-blind rename** — rename a blessed `def` away and
+    an unrelated `def` INTO its name in the same commit, DELETING the original
+    suppression, and the registry shows one live anchor covering one live
+    suppression; nothing in the tree distinguishes that from an honest entry,
+    so the gate says nothing rather than guess. Candidate closure: bind the
+    entry to the approved site's content (a normalized fingerprint of the
+    suppressed statement), or require `reason` to open with the qualified
+    symbol so a drift is at least review-visible. (b) **line-anchored entries
+    are a NOTICE, not a violation** — see item 18.
 15. **Mutual recursion (`a -> b -> a`)** — `cf-recursion-check` detects
     genuine SELF-recursion only; call-graph cycles are a v2 feature, pinned
     by tests as a declared limitation. Same family, same verdict for the
@@ -659,6 +720,26 @@ Everything below is a known gap, on the record. Ordered by blood.
     heuristic, not prose understanding: a paraphrased neutralizer passes the
     gate. Full salience is a reading task — review and the scanning models
     carry it; disclosed in the module docstring.
+18. **Line anchors in `exemptions.json` — policy, not yet law (§4.3)** — the
+    form law wants every entry symbol-anchored (a line anchor rots on any
+    insertion above it), and the gate now names every line-anchored entry
+    loudly with its migration path. Promoting that to a violation is a POLICY
+    call the operator owns, not the gate's to take, and the blocker is a
+    MISSING SCHEMA FIELD, not nerve. Measured on the flagship consumer
+    (52 entries, 49 symbol-anchored): all **3** line pins are deliberate and
+    each carries a written reason — one at module level (no enclosing def to
+    anchor to) and two adjacent same-rule suppressions sharing one enclosing
+    method, where a single symbol anchor would cover both, kill one entry, and
+    blanket-bless any future suppression of that rule dropped into that method.
+    That consumer documents the three in a repo-local pin test whose set
+    EQUALITY makes an undocumented line anchor fail and a stale documented row
+    fail too. The kit cannot express either direction today: `exemptions.json`
+    has no field saying "this pin is deliberate, and here is why", so the gate
+    has no oracle for "documented" and would red three reasoned decisions.
+    Candidate closure, in order: add a review-gated
+    `"line_anchored_by_design": "<why>"` field (empty/absent = undocumented),
+    THEN make an undocumented line anchor a violation and a documented-but-gone
+    row a notice. Until the field exists, notice is the honest verdict.
 
 ## 6. Declared source roots (monorepo layouts)
 
