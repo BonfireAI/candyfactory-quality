@@ -68,14 +68,21 @@ include_external_packages = false
 exclude_type_checking_imports = false
 
 [[tool.importlinter.contracts]]
-# The kit's measured layering: the seven gate modules sit above repo_config
-# (declared-layout resolution) above errors (the typed failure vocabulary).
-# Sibling gates are independent — no gate imports another gate.
+# The kit's measured layering: the gate modules sit above their own helper
+# stratum, above repo_config (declared-layout resolution), above errors (the
+# typed failure vocabulary). Sibling gates stay independent — no gate imports
+# another gate. exemption_anchors and exemption_surface are gate HELPERS, not
+# gates: they own cf-exemptions' anchor-liveness and measured-surface halves
+# (the 500-line file law forced both out of a 494-line module), they ship no
+# console script, and the direction is one-way — exemptions imports them, they
+# import no gate, and anchors imports surface, never the reverse.
 name = "the gates sit above repo_config above errors"
 type = "layers"
 containers = ["cf_quality"]
 layers = [
     "burn_land | exemptions | file_budget | gate_runner | import_contract | mirror_check | recursion_check | sticky_check",
+    "exemption_anchors",
+    "exemption_surface",
     "repo_config",
     "errors",
 ]
