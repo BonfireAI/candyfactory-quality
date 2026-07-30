@@ -101,7 +101,11 @@ def test_vendored_and_vcs_and_caches_are_skipped(tmp_path: Path) -> None:
 
 def test_binary_files_are_skipped(tmp_path: Path) -> None:
     (tmp_path / "asset.png").write_bytes(b"\x89PNG\x00\x00" + _REF.encode() + b"\x00")
-    assert scan_tree(tmp_path)[0] == []
+    violations, read = scan_tree(tmp_path)
+    assert violations == []
+    # and the denominator says so: a skipped file was never READ, so counting it
+    # would certify a sweep of a file the gate did not open.
+    assert read == 0
 
 
 # --- the reasoned, ratcheted exemption registry -----------------------------

@@ -332,7 +332,7 @@ class TestCompressionResistance:
         assert main(["check", "--root", str(tmp_path)]) == 1
         out = capsys.readouterr().out
         assert "ratchet the baseline down" not in out  # no shrink notice was printed
-        assert "FILE_BUDGET_GREW" in out
+        assert "src/engine/handle.py: FILE_BUDGET_GREW:" in out  # the composed line
 
     def test_joined_shrink_cannot_free_package_headroom(
         self, tmp_path: Path, capsys: Any, monkeypatch: Any

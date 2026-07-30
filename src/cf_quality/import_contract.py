@@ -355,10 +355,23 @@ def _edge_violations(code: str, summary: str, output: str) -> list[GateViolation
     return [_contract_violation(code, f"{summary}: {edge}", {"edge": edge}) for edge in edges]
 
 
+def _measured(clauses: int, modules: int) -> str:
+    """The denominator — two DIFFERENT surfaces, each named for what it is.
+
+    ``clauses`` is what PASS 1 linted in the committed contract file; ``modules``
+    is what PASS 3's AST walk opened (packages both named in a contract and
+    present as top-level). PASS 2 delegates to lint-imports and reports neither,
+    so the line states each number separately rather than saying one covers the
+    other — a contract naming no top-level package genuinely lints clauses while
+    scanning zero modules, and that is not a hole, it is two surfaces.
+    """
+    return f"— linted {clauses} contract clause(s); scanned {modules} module(s) for dynamic imports"
+
+
 def _missing_contract_verdict(root: Path) -> int:
     packages = _top_level_packages(resolve_source_root(root))
-    measured = f"— linted 0 contract clause(s) over {len(packages)} top-level package(s)"
-    evidence = {"contract_clauses": 0, "top_level_packages": len(packages)}
+    measured = _measured(0, 0)
+    evidence = {"contract_clauses": 0, "modules_scanned": 0}
     if not packages:
         return print_verdict(
             "cf-import-contract",
@@ -425,7 +438,7 @@ def _run_gate(root: Path) -> int:
         "cf-import-contract",
         violations,
         notices=notices,
-        measured=f"— linted {clauses} contract clause(s) over {modules} module(s) scanned",
+        measured=_measured(clauses, modules),
         evidence={"contract_clauses": clauses, "modules_scanned": modules},
         clean_summary=_CLEAN_SUMMARY,
     )

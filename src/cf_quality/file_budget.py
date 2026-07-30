@@ -271,8 +271,15 @@ def _run_check(root: Path, config: Path) -> int:
         "cf-file-budget",
         violations,
         notices=notices,
-        measured=f"— measured {files} file(s) against {len(budget.files)} frozen entry(ies)",
-        evidence={"files_measured": files, "frozen_files": len(budget.files)},
+        measured=(
+            f"— measured {files} file(s) against {len(budget.files)} frozen file entry(ies) "
+            f"and {len(budget.packages)} frozen package budget(s)"
+        ),
+        evidence={
+            "files_measured": files,
+            "frozen_files": len(budget.files),
+            "frozen_packages": len(budget.packages),
+        },
         clean_summary="cf-file-budget: clean",
         fail_summary=f"cf-file-budget: FAIL ({len(violations)} violation(s))",
     )

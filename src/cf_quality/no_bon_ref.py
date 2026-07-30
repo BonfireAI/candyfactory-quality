@@ -91,14 +91,20 @@ def _scan_bytes(data: bytes) -> Iterator[tuple[int, list[str]]]:
             yield index, [m.decode("ascii") for m in matches]
 
 
-def scan_file(path: Path, root: Path) -> list[GateViolation]:
-    """Scan one file; binary or unreadable files yield nothing (not a crash)."""
+def scan_file(path: Path, root: Path) -> tuple[list[GateViolation], bool]:
+    """Scan one file — findings, and whether it was READ at all.
+
+    A binary or unreadable file yields nothing (not a crash) and is reported as
+    unread: "no ticket refs found" and "never opened" are opposite worlds, and
+    only the second flag can keep the sweep's denominator from counting a file
+    it never looked inside.
+    """
     try:
         data = path.read_bytes()
     except OSError:
-        return []
+        return [], False
     if _is_binary(data):
-        return []
+        return [], False
     rel = path.relative_to(root).as_posix()
     return [
         GateViolation(
@@ -112,11 +118,11 @@ def scan_file(path: Path, root: Path) -> list[GateViolation]:
             context={"refs": refs},
         )
         for line, refs in _scan_bytes(data)
-    ]
+    ], True
 
 
 def scan_tree(root: Path) -> tuple[list[GateViolation], int]:
-    """Sweep the code/config tree — findings and files swept; GateError when absent."""
+    """Sweep the code/config tree — findings and files READ; GateError when absent."""
     if not root.exists():
         raise GateError(
             code="GATE_PATH_MISSING",
@@ -126,8 +132,9 @@ def scan_tree(root: Path) -> tuple[list[GateViolation], int]:
     violations: list[GateViolation] = []
     swept = 0
     for path in iter_source_files(root):
-        swept += 1
-        violations.extend(scan_file(path, root))
+        found, was_read = scan_file(path, root)
+        swept += int(was_read)
+        violations.extend(found)
     return sorted(violations, key=lambda v: (v.path, v.line or 0)), swept
 
 
@@ -246,8 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         "cf-no-bon-ref",
         violations,
         notices=notices,
-        measured=f"— swept {swept} file(s) of the code/config tree for ticket refs",
-        evidence={"files_swept": swept},
+        measured=f"— read {swept} text file(s) of the code/config tree for ticket refs",
+        evidence={"files_read": swept},
         clean_summary="cf-no-bon-ref: OK (no ticket references in the code/config tree)",
         fail_summary=f"cf-no-bon-ref: FAIL ({len(violations)} ticket reference(s))",
     )

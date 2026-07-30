@@ -61,6 +61,7 @@ import re
 import subprocess  # fold-in scripts run via sys.executable, fixed argv, no shell (S603 gated below)
 import sys
 import tokenize
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -167,7 +168,17 @@ def _type_ignore_suppressions(
     ]
 
 
-def _scan_src(root: Path) -> tuple[list[Suppression], list[GateViolation]]:
+def _surface_files(surface: Sequence[Path]) -> list[Path]:
+    """Every ``*.py`` the scanner opens, from an ALREADY-resolved surface."""
+    files: list[Path] = []
+    for base in surface:
+        files.extend([base] if base.is_file() else sorted(base.rglob("*.py")))
+    return files
+
+
+def _scan_src(
+    root: Path, files: Sequence[Path] | None = None
+) -> tuple[list[Suppression], list[GateViolation]]:
     """Scan the discovered Python surface for suppression comments.
 
     The ``(suppressions, violations)`` ARITY is a published contract, not an
@@ -175,20 +186,22 @@ def _scan_src(root: Path) -> tuple[list[Suppression], list[GateViolation]]:
     values from this to cross-check its mirrored resolver (see
     :func:`_matches`). The anchor audit therefore takes its surface from
     :mod:`cf_quality.exemption_surface` rather than riding a third element.
+
+    ``files`` threads in the file list a caller already resolved, so the surface
+    is discovered ONCE and the count a caller reports is this very walk. Omitted
+    — the one-argument shape the consumer pin calls — it resolves its own.
     """
+    if files is None:
+        files = _surface_files(discover_scan_paths(root))
     suppressions: list[Suppression] = []
     violations: list[GateViolation] = []
-    for base in discover_scan_paths(root):
-        files = [base] if base.is_file() else sorted(base.rglob("*.py"))
-        for file_path in files:
-            rel_path = file_path.relative_to(root).as_posix()
-            spans = symbol_spans(file_path)
-            for line, text in _comment_tokens(file_path):
-                found, broken = _classify_comment(
-                    rel_path, line, text, enclosing_symbol(spans, line)
-                )
-                suppressions.extend(found)
-                violations.extend(broken)
+    for file_path in files:
+        rel_path = file_path.relative_to(root).as_posix()
+        spans = symbol_spans(file_path)
+        for line, text in _comment_tokens(file_path):
+            found, broken = _classify_comment(rel_path, line, text, enclosing_symbol(spans, line))
+            suppressions.extend(found)
+            violations.extend(broken)
     return suppressions, violations
 
 
@@ -287,9 +300,10 @@ def _ratchet_report(entry_count: int, frozen_count: int) -> tuple[list[GateViola
 
 def check(root: Path) -> tuple[list[GateViolation], list[str], dict[str, int]]:
     """Run checks (a)-(e) — (violations, report lines, the counts measured)."""
-    suppressions, violations = _scan_src(root)
     surface = tuple(discover_scan_paths(root))
-    counts = {"suppressions": len(suppressions), "scan_paths": len(surface), "entries": 0}
+    files = _surface_files(surface)
+    suppressions, violations = _scan_src(root, files)
+    counts = {"suppressions": len(suppressions), "files_scanned": len(files), "entries": 0}
     config = _load_config(root)
     if config is None:
         if suppressions:
@@ -460,8 +474,9 @@ def main(argv: list[str] | None = None) -> int:
             violations,
             notices=notices,
             measured=(
-                f"— measured {counts['suppressions']} suppression(s) over "
-                f"{counts['scan_paths']} scan path(s) against {counts['entries']} entry(ies)"
+                f"— read {counts['files_scanned']} Python file(s), found "
+                f"{counts['suppressions']} suppression(s) against "
+                f"{counts['entries']} registered entry(ies)"
             ),
             evidence=counts,
             clean_summary="cf-exemptions: OK",

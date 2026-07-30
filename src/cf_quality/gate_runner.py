@@ -205,7 +205,7 @@ def _verdict_from_proc(gate: str, proc: subprocess.CompletedProcess[str]) -> Gat
 
     1. a full GateVerdict JSON (or any object carrying ``error``) → use it;
     2. the ``{gate, violations}`` subset (a partial emitter) → verdict, error=None;
-    3. non-JSON human text (e.g. sticky-check) → exit-code semantics: rc 0 is
+    3. non-JSON human text (a foreign emitter) → exit-code semantics: rc 0 is
        clean, any non-zero is one violation carrying the output (NOT a GateError
        — unparseable output is not a gate-could-not-run condition).
     """
