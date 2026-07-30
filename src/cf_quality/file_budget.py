@@ -267,17 +267,24 @@ def init_tree(root: Path) -> dict[str, Any]:
 def _run_check(root: Path, config: Path) -> int:
     budget = load_budget(config)
     violations, notices, files = check_tree(root, budget)
+    # Only an entry carrying a line count is FROZEN (shrink-only). A
+    # declared-not-banned entry is a purpose with no ceiling — _check_file
+    # treats it exactly like an undeclared file — so counting the whole
+    # baseline as "frozen" would claim a ratchet that is not being enforced.
+    frozen = sum(1 for entry in budget.files.values() if entry.frozen_lines is not None)
     return print_verdict(
         "cf-file-budget",
         violations,
         notices=notices,
         measured=(
-            f"— measured {files} file(s) against {len(budget.files)} frozen file entry(ies) "
+            f"— measured {files} file(s) against {frozen} frozen file entry(ies), "
+            f"{len(budget.files) - frozen} declared-not-banned entry(ies) "
             f"and {len(budget.packages)} frozen package budget(s)"
         ),
         evidence={
             "files_measured": files,
-            "frozen_files": len(budget.files),
+            "frozen_files": frozen,
+            "declared_files": len(budget.files) - frozen,
             "frozen_packages": len(budget.packages),
         },
         clean_summary="cf-file-budget: clean",

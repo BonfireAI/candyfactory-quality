@@ -36,6 +36,7 @@ from cf_quality.mirror_check import main as mirror_main
 from cf_quality.mirror_check import render_template
 from cf_quality.no_bon_ref import main as no_bon_ref_main
 from cf_quality.recursion_check import main as recursion_main
+from cf_quality.sticky_check import canonical_text
 from cf_quality.sticky_check import main as sticky_main
 
 # --- the wire carries the measurement (real JSON, no mock) -------------------
@@ -69,15 +70,36 @@ def test_file_budget_speaks_the_wire_form_like_every_other_gate(
 
     assert verdict["gate"] == "cf-file-budget"
     assert verdict["notices"] == [
-        "— measured 1 file(s) against 0 frozen file entry(ies) and 0 frozen package budget(s)"
+        "— measured 1 file(s) against 0 frozen file entry(ies), 0 declared-not-banned "
+        "entry(ies) and 0 frozen package budget(s)"
     ]
     # BOTH baselines the gate enforces ride the evidence — the package budget is
     # a second ceiling, and reporting only the file entries hid it.
     assert verdict["evidence"] == {
         "files_measured": 1,
         "frozen_files": 0,
+        "declared_files": 0,
         "frozen_packages": 0,
     }
+
+
+def test_declared_not_banned_entries_are_not_counted_as_frozen(
+    tmp_path: Path, capsys: Any, monkeypatch: Any
+) -> None:
+    # A purpose-only entry has NO line ceiling — _check_file treats it exactly
+    # like an undeclared file. Counting the whole baseline as "frozen" claimed a
+    # shrink-only ratchet over a file that has none.
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "file-budget.json").write_text(
+        json.dumps({"files": {"a.py": {"purpose": "adapter"}}, "packages": {}}), encoding="utf-8"
+    )
+    monkeypatch.setenv("CF_QUALITY_JSON", "1")
+
+    assert file_budget_main(["check", "--root", str(tmp_path)]) == 0
+    evidence = json.loads(capsys.readouterr().out)["evidence"]
+
+    assert evidence["frozen_files"] == 0, "a purpose without a line count freezes nothing"
+    assert evidence["declared_files"] == 1
 
 
 def test_file_budget_evidence_carries_both_frozen_baselines(
@@ -143,11 +165,30 @@ def test_zero_denominator_counts_files_read_not_files_offered(tmp_path: Path, ca
 
 
 def test_zero_denominator_is_visible_for_recursion_check(tmp_path: Path, capsys: Any) -> None:
+    # A present tree holding NO Python, not a bare empty dir: the walk offers a
+    # file and the gate must still say 0. An empty directory drives every
+    # counting bug to 0 and so proves nothing.
+    (tmp_path / "notes.txt").write_text("not python\n", encoding="utf-8")
+
     assert recursion_main([str(tmp_path)]) == 0
     assert "— walked 0 Python file(s)" in capsys.readouterr().out
 
 
+def test_recursion_denominator_tracks_the_files_it_walked(tmp_path: Path, capsys: Any) -> None:
+    # The zero alone would survive a hardcoded 0. This is the other half of the
+    # rod: the same gate on real Python must report the count, not the constant.
+    for name in ("a.py", "b.py"):
+        (tmp_path / name).write_text("x = 1\n", encoding="utf-8")
+
+    assert recursion_main([str(tmp_path)]) == 0
+    assert "— walked 2 Python file(s)" in capsys.readouterr().out
+
+
 def test_zero_denominator_is_visible_for_file_budget(tmp_path: Path, capsys: Any) -> None:
+    # Present tree, no Python — the budget measures *.py only, so a denominator
+    # counting every file it was offered would read 1 here.
+    (tmp_path / "README.md").write_text("# prose\n", encoding="utf-8")
+
     assert file_budget_main(["check", "--root", str(tmp_path)]) == 0
     assert "— measured 0 file(s)" in capsys.readouterr().out
 
@@ -161,6 +202,17 @@ def test_zero_denominator_is_visible_for_sticky_check(tmp_path: Path, capsys: An
 
     assert sticky_main(["check", str(tmp_path)]) == 0
     assert "— examined 0 CLAUDE.md" in capsys.readouterr().out
+
+
+def test_sticky_denominator_reads_one_when_a_claude_md_was_examined(
+    tmp_path: Path, capsys: Any
+) -> None:
+    # Without this, `int(present)` could be hardcoded to 0 and every board line
+    # would claim the gauge examined nothing while still grading the file.
+    (tmp_path / "CLAUDE.md").write_text(canonical_text(), encoding="utf-8")
+
+    assert sticky_main(["check", str(tmp_path)]) == 0
+    assert "— examined 1 CLAUDE.md" in capsys.readouterr().out
 
 
 def test_zero_denominator_for_exemptions_counts_files_not_surface_bases(

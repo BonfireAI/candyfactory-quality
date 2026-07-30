@@ -191,6 +191,20 @@ class TestCheck:
         codes = sorted(v.code for v in check_mirrors(tmp_path, today=TODAY)[0])
         assert codes == ["MIRROR_DIVERGED", "MIRROR_FILE_MISSING"]
 
+    def test_row_count_tracks_the_rows_checked(self, tmp_path: Path) -> None:
+        # The board's denominator. Asserted here against a KNOWN row count,
+        # because the zero case (a header with no rows) would equally survive a
+        # hardcoded 0 — and then every board line would claim 0 mirrors checked
+        # while the gate was really enforcing three.
+        digest = make_mirror(tmp_path, "data/good.md", b"fine\n")
+        rows = (
+            row("data/good.md", digest)
+            + row("data/ghost.md", sha256_of(b"y"), artifact="ghost")
+            + row("data/good.md", sha256_of(b"other"), artifact="diverged")
+        )
+        write_mirrors(tmp_path, rows)
+        assert check_mirrors(tmp_path, today=TODAY)[1] == 3
+
 
 class TestInit:
     def test_init_writes_template_that_parses_clean(self, tmp_path: Path) -> None:
