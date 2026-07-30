@@ -209,8 +209,8 @@ def scan_file(path: Path, root: Path) -> list[GateViolation]:
     return violations
 
 
-def scan_tree(root: Path) -> list[GateViolation]:
-    """Scan every ``*.py`` under ``root``; raise GateError if the root is absent."""
+def scan_tree(root: Path) -> tuple[list[GateViolation], int]:
+    """Scan every ``*.py`` under ``root`` — findings and files walked; GateError if absent."""
     if not root.exists():
         raise GateError(
             code="GATE_PATH_MISSING",
@@ -218,9 +218,11 @@ def scan_tree(root: Path) -> list[GateViolation]:
             context={"path": str(root)},
         )
     violations: list[GateViolation] = []
+    walked = 0
     for path in sorted(root.rglob("*.py")):
+        walked += 1
         violations.extend(scan_file(path, root=root))
-    return violations
+    return violations, walked
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -241,12 +243,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         paths = args.paths or [str(resolve_source_root(Path()))]
-        violations = [v for path in paths for v in scan_tree(Path(path))]
+        scans = [scan_tree(Path(path)) for path in paths]
     except GateError as exc:
         return print_verdict("cf-recursion-check", [], exc)
+    violations = [v for found, _ in scans for v in found]
+    walked = sum(count for _, count in scans)
     return print_verdict(
         "cf-recursion-check",
         violations,
+        measured=f"— walked {walked} Python file(s) for undeclared self-recursion",
+        evidence={"files_walked": walked, "trees": len(scans)},
         clean_summary="cf-recursion-check: OK (all self-recursion carries a declared bound)",
         fail_summary=f"cf-recursion-check: FAIL ({len(violations)} undeclared recursion(s))",
     )

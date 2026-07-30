@@ -23,6 +23,7 @@ import json
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 from cf_quality.errors import GateError, GateVerdict, GateViolation
 
@@ -51,6 +52,8 @@ def print_verdict(
     *,
     json_output: bool | None = None,
     notices: Sequence[str] = (),
+    measured: str | None = None,
+    evidence: Mapping[str, Any] | None = None,
     clean_summary: str | None = None,
     fail_summary: str | None = None,
 ) -> int:
@@ -61,8 +64,21 @@ def print_verdict(
     (clean) when supplied. Opt-in (``json_output`` true, or the
     ``CF_QUALITY_JSON`` env var): print only the :class:`GateVerdict` JSON
     wire form. Either way the return value is the derived exit code.
+
+    ``measured`` is THE denominator: the ONE line saying what the gate
+    examined. It rides the verdict — to the wire, and to the aggregated board
+    line — and prints first in human mode; ``evidence`` is that same
+    measurement in machine form. ``notices`` stays the gate's multi-line HUMAN
+    report prose (registered exemptions, shrink reports) and never reaches the
+    wire, where it would bury the denominator in a blob.
     """
-    verdict = GateVerdict(gate=gate, violations=list(violations), error=error)
+    verdict = GateVerdict(
+        gate=gate,
+        violations=list(violations),
+        error=error,
+        notices=[measured] if measured is not None else [],
+        evidence=dict(evidence or {}),
+    )
     if json_output is None:
         json_output = json_output_enabled()
     if json_output:
@@ -83,11 +99,11 @@ def _emit_human(
     clean_summary: str | None,
     fail_summary: str | None,
 ) -> int:
-    """Notices, then findings, then a summary — the local-reader default."""
+    """The denominator, then notices, findings, and a summary — the default."""
     if verdict.error is not None:
         print(json.dumps(verdict.error.to_dict(), ensure_ascii=False), file=sys.stderr)
         return verdict.exit_code
-    for notice in notices:
+    for notice in (*verdict.notices, *notices):
         print(notice)
     for violation in verdict.violations:
         print(f"{violation_location(violation)}: {violation.code}: {violation.message}")

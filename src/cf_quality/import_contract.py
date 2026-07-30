@@ -259,17 +259,19 @@ def _is_dynamic_import(call: ast.Call) -> bool:
     return isinstance(func, ast.Attribute) and func.attr == "import_module"
 
 
-def scan_dynamic_imports(root: Path) -> list[GateViolation]:
-    """PASS 3 — module-level dynamic imports inside contract-protected layers."""
+def scan_dynamic_imports(root: Path) -> tuple[list[GateViolation], int]:
+    """PASS 3 — module-level dynamic imports; findings and the modules scanned."""
     root = root.resolve()
     table = _load_contract_table(root)
     if table is None:
-        return []
+        return [], 0
     source_root = resolve_source_root(root)
     protected = _named_top_level(_contracts(table)) & set(_top_level_packages(source_root))
     violations: list[GateViolation] = []
+    scanned = 0
     for package in sorted(protected):
         for path in sorted((source_root / package).rglob("*.py")):
+            scanned += 1
             rel = path.relative_to(root).as_posix()
             violations.extend(
                 GateViolation(
@@ -284,7 +286,7 @@ def scan_dynamic_imports(root: Path) -> list[GateViolation]:
                 for call in _module_level_calls(_read_tree(path))
                 if _is_dynamic_import(call)
             )
-    return violations
+    return violations, scanned
 
 
 def _run_lint_imports(root: Path) -> tuple[int, str]:
@@ -353,12 +355,29 @@ def _edge_violations(code: str, summary: str, output: str) -> list[GateViolation
     return [_contract_violation(code, f"{summary}: {edge}", {"edge": edge}) for edge in edges]
 
 
+def _measured(clauses: int, modules: int) -> str:
+    """The denominator — two DIFFERENT surfaces, each named for what it is.
+
+    ``clauses`` is what PASS 1 linted in the committed contract file; ``modules``
+    is what PASS 3's AST walk opened (packages both named in a contract and
+    present as top-level). PASS 2 delegates to lint-imports and reports neither,
+    so the line states each number separately rather than saying one covers the
+    other — a contract naming no top-level package genuinely lints clauses while
+    scanning zero modules, and that is not a hole, it is two surfaces.
+    """
+    return f"— linted {clauses} contract clause(s); scanned {modules} module(s) for dynamic imports"
+
+
 def _missing_contract_verdict(root: Path) -> int:
     packages = _top_level_packages(resolve_source_root(root))
+    measured = _measured(0, 0)
+    evidence = {"contract_clauses": 0, "modules_scanned": 0}
     if not packages:
         return print_verdict(
             "cf-import-contract",
             [],
+            measured=measured,
+            evidence=evidence,
             clean_summary="cf-import-contract: OK (no top-level packages, no contract required)",
         )
     violation = _contract_violation(
@@ -367,7 +386,7 @@ def _missing_contract_verdict(root: Path) -> int:
         "contract ([tool.importlinter] in pyproject.toml)",
         {"packages": packages},
     )
-    return print_verdict("cf-import-contract", [violation])
+    return print_verdict("cf-import-contract", [violation], measured=measured, evidence=evidence)
 
 
 _CLEAN_SUMMARY = (
@@ -411,10 +430,17 @@ def _run_gate(root: Path) -> int:
         return _missing_contract_verdict(root)
     violations = lint_contract(root)
     violations += _pass_two(root, tolerate_config_error=bool(violations))
-    violations += scan_dynamic_imports(root)
+    dynamic, modules = scan_dynamic_imports(root)
+    violations += dynamic
+    clauses = len(_contracts(table))
     notices: list[str] = [] if violations else _honored_notices(table)
     return print_verdict(
-        "cf-import-contract", violations, notices=notices, clean_summary=_CLEAN_SUMMARY
+        "cf-import-contract",
+        violations,
+        notices=notices,
+        measured=_measured(clauses, modules),
+        evidence={"contract_clauses": clauses, "modules_scanned": modules},
+        clean_summary=_CLEAN_SUMMARY,
     )
 
 

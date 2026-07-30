@@ -72,6 +72,13 @@ class TestHumanDefault:
         out = capsys.readouterr().out
         assert out.index("a notice") < out.index("CODE_X")
 
+    def test_denominator_precedes_the_report_prose(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        print_verdict("cf-x", [], notices=["a notice"], measured="— measured 0 file(s)")
+        out = capsys.readouterr().out
+        assert out.index("— measured 0 file(s)") < out.index("a notice")
+
     def test_default_human_output_is_not_json(self, capsys: pytest.CaptureFixture[str]) -> None:
         print_verdict("cf-x", [_violation(line=7)], fail_summary="cf-x: FAIL (1)")
         out = capsys.readouterr().out
@@ -115,6 +122,23 @@ class TestJsonWireForm:
         assert "a notice" not in out
         assert "cf-x: OK" not in out
         assert json.loads(out)["passed"] is True
+
+    def test_wire_carries_the_denominator_and_not_the_report_prose(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The crux of the split: the ONE measurement line rides the wire, the
+        # gate's multi-line human report does not (it would bury the board).
+        print_verdict(
+            "cf-x",
+            [],
+            json_output=True,
+            notices=["registered: src/a.py:3 — covered by entry 0", "second prose line"],
+            measured="— measured 4 file(s) against a 2-file floor",
+            evidence={"files": 4, "floor": 2},
+        )
+        report: dict[str, Any] = json.loads(capsys.readouterr().out)
+        assert report["notices"] == ["— measured 4 file(s) against a 2-file floor"]
+        assert report["evidence"] == {"files": 4, "floor": 2}
 
     def test_json_gate_error_goes_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
         err = GateError(code="GATE_BOOM", message="cannot run")

@@ -102,6 +102,36 @@ def test_clean_consumer_passes_the_full_battery(
     assert "complexipy" in by_gate, "the ratchet stage ran (snapshot watermark present)"
 
 
+def test_every_cf_gate_reaches_the_board_carrying_a_denominator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The denominator of the denominators — asserted through the REAL wire.
+
+    Every other denominator test drives one gate's ``main`` in-process. This one
+    is the only place the whole crossing is proven: gate subprocess -> JSON wire
+    -> ``_structured_verdict`` parse-back -> the aggregated board. That crossing
+    is where the measurement used to be thrown away, so a gate whose wire form
+    regressed — or an eighth cf-* stage added without ``measured=`` — would
+    otherwise land as a bare ``PASS`` with nothing going red.
+
+    ``_verdict_from_proc`` FABRICATES an empty verdict for a cf-* gate whose
+    output it cannot parse (wire shape 3). That fallback is invisible on a green
+    board, which is exactly why the assertion is ``notices and evidence`` rather
+    than a passed flag: it makes the silent fallback fatal for a kit gate.
+    """
+    consumer = _consumer_copy(tmp_path)
+    _stub_pytest(monkeypatch)
+
+    verdicts = run_battery(consumer, os.environ)
+    cf_verdicts = [v for v in verdicts if v.gate.startswith("cf-") and v.error is None]
+
+    assert cf_verdicts, _board(verdicts)  # the gates ran at all — never a vacuous loop
+    for verdict in cf_verdicts:
+        assert verdict.notices, f"{verdict.gate} reached the board with no denominator"
+        assert verdict.evidence, f"{verdict.gate} carries no machine-form measurement"
+        assert len(verdict.notices) == 1, f"{verdict.gate}: ONE denominator line, not a blob"
+
+
 def test_injected_type_error_flips_the_battery_red(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

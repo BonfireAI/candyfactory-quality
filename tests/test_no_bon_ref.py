@@ -38,7 +38,7 @@ def _write(root: Path, rel: str, body: str) -> Path:
 
 def test_ref_in_python_comment_is_a_violation(tmp_path: Path) -> None:
     _write(tmp_path, "src/widget.py", f"# touch hardening ({_REF})\nx = 1\n")
-    violations = scan_tree(tmp_path)
+    violations, _ = scan_tree(tmp_path)
     assert len(violations) == 1
     v = violations[0]
     assert v.code == "TICKET_REF_IN_SOURCE"
@@ -51,27 +51,27 @@ def test_ref_in_css_and_gitignore_and_config_all_caught(tmp_path: Path) -> None:
     _write(tmp_path, "src/styles/builder.css", f"/* TOUCH HARDENING ({_REF}) */\n")
     _write(tmp_path, ".gitignore", f"# Playwright ({_REF} e2e)\ntest-results\n")
     _write(tmp_path, "playwright.config.js", f"// device matrix ({_REF}).\n")
-    paths = {v.path for v in scan_tree(tmp_path)}
+    paths = {v.path for v in scan_tree(tmp_path)[0]}
     assert paths == {"src/styles/builder.css", ".gitignore", "playwright.config.js"}
 
 
 def test_ref_in_test_name_is_caught(tmp_path: Path) -> None:
     # the law explicitly governs TEST NAMES, so the tests/ tree is swept.
     _write(tmp_path, "tests/test_more.py", f'"""covers {_REF}."""\nx = 1\n')
-    paths = {v.path for v in scan_tree(tmp_path)}
+    paths = {v.path for v in scan_tree(tmp_path)[0]}
     assert "tests/test_more.py" in paths
 
 
 def test_multiple_refs_one_violation_per_line(tmp_path: Path) -> None:
     _write(tmp_path, "src/a.py", f"# {_REF}\n# {_REF2}\nok = 1\n")
-    violations = scan_tree(tmp_path)
+    violations, _ = scan_tree(tmp_path)
     assert len(violations) == 2
     assert {v.line for v in violations} == {1, 2}
 
 
 def test_clean_tree_has_no_violations(tmp_path: Path) -> None:
     _write(tmp_path, "src/widget.py", "# touch hardening (phone-first)\nx = 1\n")
-    assert scan_tree(tmp_path) == []
+    assert scan_tree(tmp_path)[0] == []
 
 
 # --- jurisdiction: docs/ carry provenance, not banned -----------------------
@@ -82,26 +82,30 @@ def test_docs_dir_is_out_of_jurisdiction(tmp_path: Path) -> None:
     # the law governs CODE, not provenance prose.
     _write(tmp_path, "docs/design/plan.md", f"Epic {_REF} ships the builder.\n")
     _write(tmp_path, "docs/law-debt.md", f"- {_REF2} backend typed-error debt\n")
-    assert scan_tree(tmp_path) == []
+    assert scan_tree(tmp_path)[0] == []
 
 
 def test_markdown_anywhere_is_prose_not_code(tmp_path: Path) -> None:
     # a README or markdown note is documentation provenance, even outside docs/.
     _write(tmp_path, "ts/README.md", f"Built under {_REF}.\n")
     _write(tmp_path, "src/NOTES.md", f"see {_REF2}\n")
-    assert scan_tree(tmp_path) == []
+    assert scan_tree(tmp_path)[0] == []
 
 
 def test_vendored_and_vcs_and_caches_are_skipped(tmp_path: Path) -> None:
     _write(tmp_path, "node_modules/dep/index.js", f"// {_REF}\n")
     _write(tmp_path, "__pycache__/x.txt", f"{_REF}\n")
     _write(tmp_path, ".git/COMMIT_EDITMSG", f"{_REF}\n")
-    assert scan_tree(tmp_path) == []
+    assert scan_tree(tmp_path)[0] == []
 
 
 def test_binary_files_are_skipped(tmp_path: Path) -> None:
     (tmp_path / "asset.png").write_bytes(b"\x89PNG\x00\x00" + _REF.encode() + b"\x00")
-    assert scan_tree(tmp_path) == []
+    violations, read = scan_tree(tmp_path)
+    assert violations == []
+    # and the denominator says so: a skipped file was never READ, so counting it
+    # would certify a sweep of a file the gate did not open.
+    assert read == 0
 
 
 # --- the reasoned, ratcheted exemption registry -----------------------------
@@ -115,7 +119,7 @@ def test_registered_exemption_blesses_a_code_path_ref(tmp_path: Path) -> None:
         '{"frozen_count": 1, "entries": ['
         '{"path": "src/generated/*", "reason": "vendored upstream codegen carries its tag"}]}',
     )
-    violations, notices = check(tmp_path)
+    violations, notices, _ = check(tmp_path)
     assert violations == []
     assert any("src/generated/schema.py" in line for line in notices)
 
@@ -127,7 +131,7 @@ def test_exemption_not_matching_still_fails(tmp_path: Path) -> None:
         "no-bon-ref-exemptions.json",
         '{"frozen_count": 1, "entries": [{"path": "src/other/*", "reason": "elsewhere"}]}',
     )
-    violations, _ = check(tmp_path)
+    violations, _, _ = check(tmp_path)
     assert [v.path for v in violations] == ["src/hand.py"]
 
 
@@ -137,7 +141,7 @@ def test_entries_over_frozen_count_fails_ratchet(tmp_path: Path) -> None:
         "no-bon-ref-exemptions.json",
         '{"frozen_count": 0, "entries": [{"path": "src/x/*", "reason": "r"}]}',
     )
-    violations, _ = check(tmp_path)
+    violations, _, _ = check(tmp_path)
     assert any(v.code == "EXEMPTION_COUNT_EXCEEDED" for v in violations)
 
 
@@ -180,5 +184,5 @@ def test_main_config_error_returns_two(tmp_path: Path) -> None:
 
 def test_isinstance_findings_are_gate_violations(tmp_path: Path) -> None:
     _write(tmp_path, "src/bad.py", f"# {_REF}\n")
-    violations = scan_tree(tmp_path)
+    violations, _ = scan_tree(tmp_path)
     assert all(isinstance(v, GateViolation) for v in violations)

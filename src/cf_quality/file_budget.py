@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 from cf_quality.errors import GateError, GateViolation
+from cf_quality.reporting import print_verdict
 
 NEW_FILE_BUDGET = 500
 SKIP_DIR_NAMES = {"__pycache__", "node_modules", "build", "dist", "venv"}
@@ -229,8 +230,8 @@ def _check_packages(budget: Budget, measured: dict[str, int]) -> list[GateViolat
     return violations
 
 
-def check_tree(root: Path, budget: Budget) -> tuple[list[GateViolation], list[str]]:
-    """Measure the tree against the baseline; return (violations, notices)."""
+def check_tree(root: Path, budget: Budget) -> tuple[list[GateViolation], list[str], int]:
+    """Measure the tree; return (violations, notices, the count of files measured)."""
     measured = {
         path.relative_to(root).as_posix(): measure_file(path) for path in iter_python_files(root)
     }
@@ -246,7 +247,7 @@ def check_tree(root: Path, budget: Budget) -> tuple[list[GateViolation], list[st
         if entry.frozen_lines is not None and rel not in measured:
             notices.append(f"shrink: {rel} {entry.frozen_lines} -> deleted (drop from baseline)")
     violations.extend(_check_packages(budget, measured))
-    return violations, notices
+    return violations, notices, len(measured)
 
 
 def init_tree(root: Path) -> dict[str, Any]:
@@ -264,15 +265,31 @@ def init_tree(root: Path) -> dict[str, Any]:
 
 
 def _run_check(root: Path, config: Path) -> int:
-    violations, notices = check_tree(root, load_budget(config))
-    for notice in notices:
-        print(notice)
-    if violations:
-        report = {"gate": "cf-file-budget", "violations": [v.to_dict() for v in violations]}
-        print(json.dumps(report, indent=2))
-        return 1
-    print("cf-file-budget: clean")
-    return 0
+    budget = load_budget(config)
+    violations, notices, files = check_tree(root, budget)
+    # Only an entry carrying a line count is FROZEN (shrink-only). A
+    # declared-not-banned entry is a purpose with no ceiling — _check_file
+    # treats it exactly like an undeclared file — so counting the whole
+    # baseline as "frozen" would claim a ratchet that is not being enforced.
+    frozen = sum(1 for entry in budget.files.values() if entry.frozen_lines is not None)
+    return print_verdict(
+        "cf-file-budget",
+        violations,
+        notices=notices,
+        measured=(
+            f"— measured {files} file(s) against {frozen} frozen file entry(ies), "
+            f"{len(budget.files) - frozen} declared-not-banned entry(ies) "
+            f"and {len(budget.packages)} frozen package budget(s)"
+        ),
+        evidence={
+            "files_measured": files,
+            "frozen_files": frozen,
+            "declared_files": len(budget.files) - frozen,
+            "frozen_packages": len(budget.packages),
+        },
+        clean_summary="cf-file-budget: clean",
+        fail_summary=f"cf-file-budget: FAIL ({len(violations)} violation(s))",
+    )
 
 
 def _run_init(root: Path, config: Path) -> int:
