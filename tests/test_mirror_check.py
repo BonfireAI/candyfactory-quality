@@ -59,6 +59,37 @@ def row(
     return f"| {artifact} | {rel} | {parent_repo} | {parent_path} | {sha} | {digest} | {pinned} |\n"
 
 
+def real_clock_pin(days_ago: int = 1) -> str:
+    """An ISO pin relative to the REAL date, for tests that drive main().
+
+    main() judges staleness against the real clock, so a fixed fixture date
+    silently expires once the calendar passes it by the max pin age. Pins for
+    the CLI path are therefore always written relative to today.
+    """
+    return (dt.date.today() - dt.timedelta(days=days_ago)).isoformat()
+
+
+def main_at_pin_age(
+    repo: Path, digest: str, age_days: int, capsys: pytest.CaptureFixture[str]
+) -> tuple[int, str]:
+    """Run main() on a row pinned ``age_days`` before the real today.
+
+    Re-runs once if the date rolled over mid-call, so the measured age is exact
+    rather than off by one at midnight. The real clock is never mocked. Each
+    attempt drains capsys first and the returned stdout is that attempt's
+    alone, so a discarded rolled-over run cannot leak into the assertions.
+    """
+    for _ in range(2):
+        capsys.readouterr()  # discard anything a previous attempt printed
+        before = dt.date.today()
+        write_mirrors(repo, row("data/intro.md", digest, pinned=real_clock_pin(age_days)))
+        code = main(["--repo", str(repo)])
+        out = capsys.readouterr().out
+        if dt.date.today() == before:
+            return code, out
+    raise AssertionError("the date rolled over during both attempts")
+
+
 class TestParse:
     def test_missing_required_column_raises_typed_gate_error(self, tmp_path: Path) -> None:
         bad_header = "| artifact | local path |\n|---|---|\n"
@@ -224,20 +255,29 @@ class TestInit:
 
 
 class TestMain:
-    def test_main_clean_exits_zero(self, tmp_path: Path) -> None:
+    def test_main_clean_exits_zero(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
-        write_mirrors(tmp_path, row("data/intro.md", digest))
+        write_mirrors(tmp_path, row("data/intro.md", digest, pinned=real_clock_pin()))
         assert main(["--repo", str(tmp_path)]) == 0
+        # The denominator: a gate that read zero rows would also exit 0.
+        assert "checked 1 declared mirror row(s)" in capsys.readouterr().out
 
     def test_main_divergence_exits_one_and_prints_finding(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         make_mirror(tmp_path, "data/intro.md", b"drifted\n")
-        write_mirrors(tmp_path, row("data/intro.md", sha256_of(b"original\n")))
+        pinned = real_clock_pin()
+        write_mirrors(tmp_path, row("data/intro.md", sha256_of(b"original\n"), pinned=pinned))
         assert main(["--repo", str(tmp_path)]) == 1
         out = capsys.readouterr().out
-        assert "MIRROR_DIVERGED" in out
-        assert "data/intro.md" in out
+        assert "checked 1 declared mirror row(s)" in out
+        finding_lines = [line for line in out.splitlines() if ": MIRROR_" in line]
+        assert len(finding_lines) == 1  # exactly one finding: divergence, no pin noise
+        assert "MIRROR_DIVERGED" in finding_lines[0]
+        assert "data/intro.md" in finding_lines[0]
+        assert "MIRROR_PIN_" not in out
 
     def test_main_gate_error_exits_two_on_stderr(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -258,10 +298,34 @@ class TestMain:
 
     def test_main_max_pin_age_days_flag(self, tmp_path: Path) -> None:
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
-        old = (dt.date.today() - dt.timedelta(days=30)).isoformat()
-        write_mirrors(tmp_path, row("data/intro.md", digest, pinned=old))
+        write_mirrors(tmp_path, row("data/intro.md", digest, pinned=real_clock_pin(30)))
         assert main(["--repo", str(tmp_path), "--max-pin-age-days", "7"]) == 1
         assert main(["--repo", str(tmp_path), "--max-pin-age-days", "60"]) == 0
+
+
+class TestMainRealClockControl:
+    """Control for the real-clock path: main() takes no ``today``, so staleness is
+    judged against the actual date. Healing the fixture dates must not have
+    disarmed it. ``_check_pin`` refuses only ``age_days > max``, so 90 is allowed.
+    """
+
+    def test_main_pin_91_days_old_on_real_clock_exits_one_stale(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
+        code, out = main_at_pin_age(tmp_path, digest, 91, capsys)
+        assert code == 1
+        assert "MIRROR_PIN_STALE" in out
+        assert "91 days old (max 90)" in out
+
+    def test_main_pin_exactly_90_days_old_on_real_clock_is_allowed_exits_zero(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
+        code, out = main_at_pin_age(tmp_path, digest, 90, capsys)
+        assert code == 0
+        assert "checked 1 declared mirror row(s)" in out
+        assert "MIRROR_PIN_STALE" not in out
 
 
 class TestMainJsonWireForm:
@@ -275,7 +339,8 @@ class TestMainJsonWireForm:
     ) -> None:
         monkeypatch.setenv(JSON_ENV_VAR, "1")
         make_mirror(tmp_path, "data/intro.md", b"drifted\n")
-        write_mirrors(tmp_path, row("data/intro.md", sha256_of(b"original\n")))
+        pinned = real_clock_pin()
+        write_mirrors(tmp_path, row("data/intro.md", sha256_of(b"original\n"), pinned=pinned))
         code = main(["--repo", str(tmp_path)])
         report = json.loads(capsys.readouterr().out)
         assert code == 1
@@ -283,21 +348,25 @@ class TestMainJsonWireForm:
         assert report["passed"] is False
         assert report["exit_code"] == 1
         assert report["error"] is None
-        assert report["violations"][0]["code"] == "MIRROR_DIVERGED"
-        assert report["violations"][0]["path"] == "data/intro.md"
+        assert report["evidence"] == {"mirror_rows": 1}
+        assert len(report["violations"]) == 1  # exactly one finding, no pin noise
+        (violation,) = report["violations"]
+        assert violation["code"] == "MIRROR_DIVERGED"
+        assert violation["path"] == "data/intro.md"
 
     def test_clean_emits_passing_verdict_json(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv(JSON_ENV_VAR, "1")
         digest = make_mirror(tmp_path, "data/intro.md", b"content\n")
-        write_mirrors(tmp_path, row("data/intro.md", digest))
+        write_mirrors(tmp_path, row("data/intro.md", digest, pinned=real_clock_pin()))
         code = main(["--repo", str(tmp_path)])
         report = json.loads(capsys.readouterr().out)
         assert code == 0
         assert report["gate"] == "cf-mirror-check"
         assert report["passed"] is True
         assert report["violations"] == []
+        assert report["evidence"] == {"mirror_rows": 1}  # the denominator: one row read
 
     def test_gate_error_emits_verdict_json_on_stderr(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
