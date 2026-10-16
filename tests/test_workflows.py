@@ -171,11 +171,8 @@ def test_gate_documents_private_repo_access_assumption() -> None:
     assert "private-repo access assumption" in text
 
 
-def test_gate_uses_python_312() -> None:
-    steps = _steps(_load(GATE_PATH), "gate")
-    setup = [s for s in steps if "setup-python" in s.get("uses", "")]
-    assert len(setup) == 1
-    assert str(setup[0]["with"]["python-version"]) == "3.12"
+# test_gate_uses_python_312 (pinned the literal "3.12") was replaced by the
+# consumer-declared `.python-version` rods in test_gate_python_version.py.
 
 
 def test_gate_installs_kit_with_tool_battery() -> None:
