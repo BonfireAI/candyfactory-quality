@@ -96,10 +96,50 @@ jobs:
           fi
           echo "graded against PR head + current origin/${BASE_REF} (merge $(git rev-parse --short HEAD))"
 
-      - name: Set up Python 3.12
+      - name: Resolve the consumer's declared Python (.python-version)
+        # The zero-inputs doctrine holds here too: a consumer moves its gated
+        # Python by COMMITTING a `.python-version` at its repo root, never by a
+        # caller knob. No file = the backward-compatible default 3.12 (said out
+        # loud, never silent). A file that IS committed but is blank or does not
+        # match ^3\.[0-9]+(\.[0-9]+)?$ is REFUSED — never quietly downgraded to
+        # the default, which would grade the tree on a Python it did not declare.
+        # The refusal shows the RAW committed bytes (shell-quoted, so CR,
+        # newlines and blank files stay visible on one line); surrounding
+        # whitespace, CR included, is trimmed before the grammar match. Plain
+        # bash only: setup-python has not run yet.
+        id: python
+        shell: bash
+        run: |
+          refuse() {
+            echo "::error::quality-gate refused: the committed .python-version $1 (${2//%/%25}) — accepted grammar is a single line matching ^3\.[0-9]+(\.[0-9]+)?$ (e.g. 3.12 or 3.14.8); a committed-but-bad declaration is refused, never downgraded to the 3.12 default — fix it or delete the file"
+            exit 1
+          }
+          if [ ! -e .python-version ] && [ ! -L .python-version ]; then
+            echo "::notice::no .python-version committed — gating on the default Python 3.12"
+            echo "version=3.12" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          raw="$(cat .python-version && printf x)"
+          raw="${raw%x}"
+          shown="raw bytes: $(printf '%q' "$raw")"
+          value="${raw#"${raw%%[![:space:]]*}"}"
+          value="${value%"${value##*[![:space:]]}"}"
+          if [ -z "$value" ]; then
+            refuse "is blank" "$shown"
+          fi
+          case "$value" in
+            *$'\n'*) refuse "holds more than one line" "$shown" ;;
+          esac
+          if ! [[ "$value" =~ ^3\.[0-9]+(\.[0-9]+)?$ ]]; then
+            refuse "does not match the accepted grammar" "$shown"
+          fi
+          echo "version=$value" >> "$GITHUB_OUTPUT"
+          echo "consumer declares Python $value (.python-version)"
+
+      - name: Set up the consumer's declared Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0 (node24)
         with:
-          python-version: "3.12"
+          python-version: ${{ steps.python.outputs.version }}
 
       - name: Checkout the gauge kit at the calling SHA
         # `github.job_workflow_sha` is the commit the caller pinned this
